@@ -82,6 +82,37 @@ export interface BranchPoint {
 }
 
 // ===============================================================
+// Cross-Timeline Movement types
+// ===============================================================
+
+/** A move that crosses timeline boundaries */
+export interface CrossTimelineMove {
+  from: Square;
+  to: Square;
+  piece: PieceType;
+  sourceTimelineId: number;
+  targetTimelineId: number;
+  captured?: PieceType | null;
+  isWhite: boolean;
+}
+
+/** Valid cross-timeline target info */
+export interface CrossTimelineMoveTarget {
+  targetTimelineId: number;
+  targetSquare: Square;
+  isCapture: boolean;
+  capturedPiece?: Piece | null;
+}
+
+/** Selection state when a cross-timeline capable piece is selected */
+export interface CrossTimelineSelection {
+  sourceTimelineId: number;
+  sourceSquare: Square;
+  piece: Piece;
+  validTargets: CrossTimelineMoveTarget[];
+}
+
+// ===============================================================
 // Click/interaction types
 // ===============================================================
 

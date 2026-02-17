@@ -64,6 +64,7 @@ export class TimelineCol implements ITimelineCol {
   private historySquareMeshes: Mesh[] = [];
   private moveLineGroup: Group;
   interLayerGroup: Group;
+  private crossTimelineTargets: Mesh[] = [];  // Purple highlights for cross-timeline moves
 
   constructor(
     scene: Scene,
@@ -264,6 +265,49 @@ export class TimelineCol implements ITimelineCol {
       }
     }
     this.highlightMeshes = [];
+  }
+
+  /* Cross-timeline movement indicators */
+  showCrossTimelineTarget(sq: string, isCapture: boolean): void {
+    const pos = this._fromSq(sq);
+    // Purple ring for cross-timeline targets (larger if capture)
+    const geo = isCapture
+      ? new THREE.RingGeometry(0.38, 0.48, 32)
+      : new THREE.RingGeometry(0.28, 0.38, 32);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff,  // Purple for cross-timeline
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const ind = new THREE.Mesh(geo, mat);
+    ind.rotation.x = -Math.PI / 2;
+    ind.position.set(pos.c - 3.5, 0.08, pos.r - 3.5);
+    this.group.add(ind);
+    this.crossTimelineTargets.push(ind);
+
+    // Add pulsing glow effect
+    const glowGeo = new THREE.CircleGeometry(0.5, 32);
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff,
+      transparent: true,
+      opacity: 0.2,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(pos.c - 3.5, 0.07, pos.r - 3.5);
+    this.group.add(glow);
+    this.crossTimelineTargets.push(glow);
+  }
+
+  clearCrossTimelineTargets(): void {
+    for (const mesh of this.crossTimelineTargets) {
+      this.group.remove(mesh);
+    }
+    this.crossTimelineTargets = [];
   }
 
   /* persistent move lines on current board */
@@ -625,6 +669,29 @@ class Board3DManager implements IBoard3D {
     const to = new THREE.Vector3(toCol.xOffset, 0.2, 0);
     const tintCol = this.TIMELINE_COLORS[toTlId % this.TIMELINE_COLORS.length];
     this.branchLineGroup.add(Board3DManager._glowTube(from, to, tintCol, 0.04, 0.18, true));
+  }
+
+  /** Add a horizontal line showing cross-timeline piece movement */
+  addCrossTimelineLine(fromTlId: number, toTlId: number, square: string, isWhite: boolean): void {
+    const fromCol = this.timelineCols[fromTlId];
+    const toCol = this.timelineCols[toTlId];
+    if (!fromCol || !toCol || !this.branchLineGroup) return;
+
+    // Get the 3D position of the square in each timeline
+    const pos = this._fromSq(square);
+    const sqX = pos.c - 3.5;
+    const sqZ = pos.r - 3.5;
+
+    const from = new THREE.Vector3(fromCol.xOffset + sqX, 0.3, sqZ);
+    const to = new THREE.Vector3(toCol.xOffset + sqX, 0.3, sqZ);
+
+    // Purple for cross-timeline moves
+    const color = 0xaa44ff;
+    this.branchLineGroup.add(Board3DManager._glowTube(from, to, color, 0.03, 0.12, true));
+  }
+
+  private _fromSq(sq: string): { r: number; c: number } {
+    return { r: 8 - parseInt(sq[1]), c: sq.charCodeAt(0) - 97 };
   }
 
   setActiveTimeline(id: number): void {

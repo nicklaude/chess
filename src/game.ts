@@ -5,6 +5,7 @@ import type {
   Board,
   Piece,
   PieceType,
+  PieceColor,
   Move,
   ChessMove,
   ChessInstance,
@@ -13,6 +14,10 @@ import type {
   Snapshot,
   PendingPromotion,
   SquareClickInfo,
+  CrossTimelineMove,
+  CrossTimelineMoveTarget,
+  CrossTimelineSelection,
+  Square,
 } from './types';
 
 class GameManager {
@@ -23,6 +28,9 @@ class GameManager {
   private selectedTimelineId: number | null = null;
   private pendingPromotion: PendingPromotion | null = null;
   private viewingMoveIndex: number | null = null;
+
+  // Cross-timeline movement state
+  private crossTimelineSelection: CrossTimelineSelection | null = null;
 
   init(): void {
     Board3D.init('scene-container', (info) => this.handleClick(info));
@@ -315,6 +323,24 @@ class GameManager {
       return;
     }
 
+    // Check for cross-timeline move first
+    if (this.crossTimelineSelection && tlId !== this.crossTimelineSelection.sourceTimelineId) {
+      // Check if this is a valid cross-timeline target
+      const target = this.crossTimelineSelection.validTargets.find(
+        (t) => t.targetTimelineId === tlId && t.targetSquare === sq
+      );
+      if (target) {
+        // Execute cross-timeline move!
+        this.makeCrossTimelineMove(
+          this.crossTimelineSelection.sourceTimelineId,
+          tlId,
+          sq as Square,
+          this.crossTimelineSelection.piece
+        );
+        return;
+      }
+    }
+
     // Clicking on a non-active timeline's current board -> switch to it
     if (tlId !== this.activeTimelineId) {
       this.setActiveTimeline(tlId);
@@ -361,6 +387,21 @@ class GameManager {
       const legalMoves = chess.moves({ square: sq, verbose: true }) as ChessMove[];
       col.select(sq);
       col.showLegalMoves(legalMoves, chess.board());
+
+      // Check for cross-timeline movement capability
+      if (this.canMoveCrossTimeline(piece.type)) {
+        const crossTargets = this.getCrossTimelineTargets(tlId, sq as Square, piece);
+        if (crossTargets.length > 0) {
+          this.crossTimelineSelection = {
+            sourceTimelineId: tlId,
+            sourceSquare: sq as Square,
+            piece,
+            validTargets: crossTargets,
+          };
+          // Show cross-timeline targets in other timelines
+          this._showCrossTimelineTargets(crossTargets);
+        }
+      }
     } else {
       this.clearSelection();
     }
@@ -549,6 +590,205 @@ class GameManager {
     this._updateMoveSlider();
   }
 
+  /* -- Cross-Timeline Movement -- */
+
+  /** Check if a piece type can move across timelines (only Queen for now) */
+  private canMoveCrossTimeline(pieceType: PieceType): boolean {
+    return pieceType === 'q';  // Only Queen can cross timelines
+  }
+
+  /** Get all valid cross-timeline targets for a piece */
+  private getCrossTimelineTargets(
+    sourceTimelineId: number,
+    square: Square,
+    piece: Piece
+  ): CrossTimelineMoveTarget[] {
+    if (!this.canMoveCrossTimeline(piece.type)) {
+      return [];
+    }
+
+    const sourceTl = this.timelines[sourceTimelineId];
+    if (!sourceTl) return [];
+
+    const sourceMoveCount = sourceTl.moveHistory.length;
+    const sourceColor = piece.color;
+    const targets: CrossTimelineMoveTarget[] = [];
+
+    // Check all other timelines
+    for (const tlIdStr in this.timelines) {
+      const tlId = parseInt(tlIdStr);
+      if (tlId === sourceTimelineId) continue;
+
+      const targetTl = this.timelines[tlId];
+      if (!targetTl) continue;
+
+      // Rule: Can only move to timeline where it's your turn
+      if (targetTl.chess.turn() !== sourceColor) continue;
+
+      // Rule: Cross-timeline move counts in both timelines,
+      // so both must be at same move count (synced)
+      if (targetTl.moveHistory.length !== sourceMoveCount) continue;
+
+      // Check the same square in the target timeline
+      const targetPiece = targetTl.chess.get(square);
+
+      // Can't move if own piece is there
+      if (targetPiece && targetPiece.color === sourceColor) continue;
+
+      // Valid target!
+      targets.push({
+        targetTimelineId: tlId,
+        targetSquare: square,
+        isCapture: targetPiece !== null,
+        capturedPiece: targetPiece,
+      });
+    }
+
+    return targets;
+  }
+
+  /** Execute a cross-timeline move */
+  private makeCrossTimelineMove(
+    sourceTimelineId: number,
+    targetTimelineId: number,
+    square: Square,
+    piece: Piece
+  ): void {
+    const sourceTl = this.timelines[sourceTimelineId];
+    const targetTl = this.timelines[targetTimelineId];
+    if (!sourceTl || !targetTl) return;
+
+    const isWhite = piece.color === 'w';
+    const targetPiece = targetTl.chess.get(square);
+
+    // Clone boards before move for snapshots
+    const sourceBoardBefore = this._cloneBoard(sourceTl.chess);
+    const targetBoardBefore = this._cloneBoard(targetTl.chess);
+
+    // 1. Remove piece from source timeline
+    // Load FEN, modify board, reload
+    const sourceFen = sourceTl.chess.fen();
+    const sourceBoard = sourceTl.chess.board();
+    const pos = this._fromSq(square);
+
+    // Build new FEN without the piece
+    // For simplicity, we set the square to empty and flip turn
+    const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite);
+    sourceTl.chess.load(newSourceFen);
+
+    // 2. Add piece to target timeline (capture if enemy piece there)
+    const targetFen = targetTl.chess.fen();
+    const newTargetFen = this._modifyFen(targetFen, square, piece, !isWhite);
+    targetTl.chess.load(newTargetFen);
+
+    // 3. Record the move in both timelines
+    const crossMove: Move = {
+      from: square,
+      to: square,
+      piece: piece.type,
+      captured: targetPiece?.type || null,
+      san: `Q${square}→T${targetTimelineId}`,  // Custom notation for cross-timeline
+      isWhite,
+    };
+
+    // Source timeline: piece left
+    sourceTl.moveHistory.push({
+      ...crossMove,
+      san: `Q${square}→T${targetTimelineId}`,
+    });
+    sourceTl.snapshots.push(this._cloneBoard(sourceTl.chess));
+
+    // Target timeline: piece arrived (possibly captured)
+    targetTl.moveHistory.push({
+      ...crossMove,
+      san: `Q${square}←T${sourceTimelineId}`,
+    });
+    targetTl.snapshots.push(this._cloneBoard(targetTl.chess));
+
+    // 4. Update 3D visualization
+    const sourceCol = Board3D.getTimeline(sourceTimelineId);
+    const targetCol = Board3D.getTimeline(targetTimelineId);
+
+    if (sourceCol) {
+      sourceCol.addSnapshot(this._getSnapshotBoard(sourceBoardBefore), square, square, isWhite);
+      sourceCol.showLastMove(square, square);
+    }
+
+    if (targetCol) {
+      targetCol.addSnapshot(this._getSnapshotBoard(targetBoardBefore), square, square, isWhite);
+      targetCol.showLastMove(square, square);
+    }
+
+    // Draw line between timelines to show the move
+    Board3D.addCrossTimelineLine(sourceTimelineId, targetTimelineId, square, isWhite);
+
+    // 5. Update UI
+    this.clearSelection();
+    this.renderTimeline(sourceTimelineId);
+    this.renderTimeline(targetTimelineId);
+    this.updateStatus();
+    this.updateMoveList();
+    this.updateTimelineList();
+    this._updateMoveSlider();
+  }
+
+  /** Helper: Modify a FEN string to change a square's piece and flip turn */
+  private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean): string {
+    const parts = fen.split(' ');
+    const rows = parts[0].split('/');
+    const pos = this._fromSq(square);
+
+    // Convert FEN row to array of chars
+    const expandRow = (row: string): string[] => {
+      const result: string[] = [];
+      for (const char of row) {
+        if (char >= '1' && char <= '8') {
+          for (let i = 0; i < parseInt(char); i++) result.push('');
+        } else {
+          result.push(char);
+        }
+      }
+      return result;
+    };
+
+    // Compress array back to FEN row
+    const compressRow = (arr: string[]): string => {
+      let result = '';
+      let emptyCount = 0;
+      for (const char of arr) {
+        if (char === '') {
+          emptyCount++;
+        } else {
+          if (emptyCount > 0) {
+            result += emptyCount;
+            emptyCount = 0;
+          }
+          result += char;
+        }
+      }
+      if (emptyCount > 0) result += emptyCount;
+      return result;
+    };
+
+    // Modify the specific square
+    const rowArr = expandRow(rows[pos.r]);
+    if (newPiece) {
+      const pieceChar = newPiece.color === 'w'
+        ? newPiece.type.toUpperCase()
+        : newPiece.type.toLowerCase();
+      rowArr[pos.c] = pieceChar;
+    } else {
+      rowArr[pos.c] = '';
+    }
+    rows[pos.r] = compressRow(rowArr);
+
+    // Flip turn
+    parts[0] = rows.join('/');
+    parts[1] = whiteToMove ? 'w' : 'b';
+
+    return parts.join(' ');
+  }
+
   /* -- Promotion UI -- */
   private _showPromotionPicker(tlId: number, square: string, isWhite: boolean): void {
     const existing = document.getElementById('promotion-picker');
@@ -610,8 +850,34 @@ class GameManager {
       const col = Board3D.getTimeline(this.selectedTimelineId);
       if (col) col.clearHighlights();
     }
+    // Clear cross-timeline highlights
+    if (this.crossTimelineSelection) {
+      this._clearCrossTimelineTargets();
+      this.crossTimelineSelection = null;
+    }
     this.selected = null;
     this.selectedTimelineId = null;
+  }
+
+  /** Show cross-timeline target indicators in other timelines */
+  private _showCrossTimelineTargets(targets: CrossTimelineMoveTarget[]): void {
+    for (const target of targets) {
+      const col = Board3D.getTimeline(target.targetTimelineId);
+      if (col) {
+        col.showCrossTimelineTarget(target.targetSquare, target.isCapture);
+      }
+    }
+  }
+
+  /** Clear cross-timeline target indicators */
+  private _clearCrossTimelineTargets(): void {
+    if (!this.crossTimelineSelection) return;
+    for (const target of this.crossTimelineSelection.validTargets) {
+      const col = Board3D.getTimeline(target.targetTimelineId);
+      if (col) {
+        col.clearCrossTimelineTargets();
+      }
+    }
   }
 
   /* -- Board cloning -- */
