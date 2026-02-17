@@ -679,14 +679,23 @@ body {
     color: #ff6666;
 }
 
-/* Version info */
-#version-info {
-    font-size: 0.55rem;
-    color: #555566;
-    text-align: right;
+/* Sidebar footer with FPS and version */
+#sidebar-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 0.2rem 0.4rem;
+    font-size: 0.55rem;
     font-family: 'Monaco', 'Menlo', monospace;
     letter-spacing: 0.02em;
+}
+
+#fps-counter {
+    color: #66aa66;
+}
+
+#version-info {
+    color: #555566;
 }
 
 /* Pause button icon styling */

@@ -627,6 +627,28 @@ class Board3DManager implements IBoard3D {
   private _downPos: { x: number; y: number } | null = null;
   private _texCache: TextureCache = {};
 
+  // Performance: render-on-demand
+  private _needsRender = true;
+  private _lastRenderTime = 0;
+
+  // Performance: FPS tracking
+  private _frameCount = 0;
+  private _lastFpsUpdate = 0;
+  private _currentFps = 0;
+
+  // Performance: pooled scratch vectors (avoid GC churn)
+  private _tempVec3A = new THREE.Vector3();
+  private _tempVec3B = new THREE.Vector3();
+  private _tempVec3C = new THREE.Vector3();
+
+  // Shared materials for squares (avoid creating 64+ materials per board)
+  private _lightSquareMat: MeshStandardMaterial | null = null;
+  private _darkSquareMat: MeshStandardMaterial | null = null;
+  private _historyLightSquareMat: MeshStandardMaterial | null = null;
+  private _historyDarkSquareMat: MeshStandardMaterial | null = null;
+  private _boardBaseMat: MeshStandardMaterial | null = null;
+  private _boardTrimMat: MeshStandardMaterial | null = null;
+
   timelineCols: Record<number, TimelineCol> = {};
   private branchLineGroup: Group | null = null;
   private particleSystem: Points | null = null;
@@ -667,6 +689,79 @@ class Board3DManager implements IBoard3D {
   ];
   readonly TIMELINE_SPACING = 12;
 
+  /** Mark that a render is needed (called when state changes) */
+  markDirty(): void {
+    this._needsRender = true;
+  }
+
+  /** Get current FPS */
+  getFps(): number {
+    return this._currentFps;
+  }
+
+  /** Initialize shared materials (called once in init) */
+  private _initSharedMaterials(): void {
+    // Main board squares
+    this._lightSquareMat = new THREE.MeshStandardMaterial({
+      color: 0x7575a8,
+      metalness: 0.15,
+      roughness: 0.75,
+      side: THREE.FrontSide,
+    });
+    this._darkSquareMat = new THREE.MeshStandardMaterial({
+      color: 0x44446e,
+      metalness: 0.15,
+      roughness: 0.75,
+      side: THREE.FrontSide,
+    });
+
+    // History layer squares
+    this._historyLightSquareMat = new THREE.MeshStandardMaterial({
+      color: 0x7575a8,
+      transparent: true,
+      opacity: 0.2,
+      metalness: 0.15,
+      roughness: 0.8,
+    });
+    this._historyDarkSquareMat = new THREE.MeshStandardMaterial({
+      color: 0x44446e,
+      transparent: true,
+      opacity: 0.2,
+      metalness: 0.15,
+      roughness: 0.8,
+    });
+
+    // Board base and trim
+    this._boardBaseMat = new THREE.MeshStandardMaterial({
+      color: 0x15152a,
+      metalness: 0.7,
+      roughness: 0.3,
+    });
+    this._boardTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x333366,
+      metalness: 0.9,
+      roughness: 0.2,
+    });
+  }
+
+  /** Get shared material for square type */
+  getSquareMaterial(isLight: boolean, isHistory: boolean = false): MeshStandardMaterial {
+    if (isHistory) {
+      return isLight ? this._historyLightSquareMat! : this._historyDarkSquareMat!;
+    }
+    return isLight ? this._lightSquareMat! : this._darkSquareMat!;
+  }
+
+  /** Get shared board base material */
+  getBoardBaseMaterial(): MeshStandardMaterial {
+    return this._boardBaseMat!;
+  }
+
+  /** Get shared board trim material */
+  getBoardTrimMaterial(): MeshStandardMaterial {
+    return this._boardTrimMat!;
+  }
+
   init(
     containerId: string,
     onSquareClick: (info: { timelineId: number; square: string; turn: number; isHistory: boolean }) => void
@@ -680,6 +775,9 @@ class Board3DManager implements IBoard3D {
     this._clock = new THREE.Clock();
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
+
+    // Initialize shared materials for performance
+    this._initSharedMaterials();
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -1107,8 +1205,8 @@ class Board3DManager implements IBoard3D {
     }
   }
 
-  private _updatePanning(): void {
-    if (!this._panKeys || !this.camera || !this.controls) return;
+  private _updatePanning(): boolean {
+    if (!this._panKeys || !this.camera || !this.controls) return false;
 
     let panX = 0;
     let panZ = 0;
@@ -1117,18 +1215,23 @@ class Board3DManager implements IBoard3D {
     if (this._panKeys.a) panX -= this._panSpeed;
     if (this._panKeys.d) panX += this._panSpeed;
 
+    let isPanning = false;
+
     if (panX !== 0 || panZ !== 0) {
-      // Get camera's forward and right vectors projected onto XZ plane
-      const forward = new THREE.Vector3();
+      isPanning = true;
+      // Use pooled vectors to avoid GC churn
+      const forward = this._tempVec3A;
       this.camera.getWorldDirection(forward);
       forward.y = 0;
       forward.normalize();
 
-      const right = new THREE.Vector3();
-      right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+      const right = this._tempVec3B;
+      right.set(0, 1, 0);
+      right.crossVectors(forward, right).normalize();
 
-      // Calculate movement
-      const move = new THREE.Vector3();
+      // Calculate movement using pooled vector
+      const move = this._tempVec3C;
+      move.set(0, 0, 0);
       move.addScaledVector(forward, -panZ);
       move.addScaledVector(right, panX);
 
@@ -1139,11 +1242,13 @@ class Board3DManager implements IBoard3D {
 
     // Q/E keyboard rotation (slow orbit around target)
     if (this._panKeys.q || this._panKeys.e) {
+      isPanning = true;
       const rotateDir = this._panKeys.q ? 1 : -1; // Q = rotate left, E = rotate right
       const rotateSpeed = 0.015; // Slow rotation
 
-      // Get current camera position relative to target
-      const offset = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
+      // Use pooled vector for offset
+      const offset = this._tempVec3A;
+      offset.subVectors(this.camera.position, this.controls.target);
 
       // Rotate around Y axis
       const angle = rotateDir * rotateSpeed;
@@ -1158,6 +1263,8 @@ class Board3DManager implements IBoard3D {
       // Apply new position
       this.camera.position.copy(this.controls.target).add(offset);
     }
+
+    return isPanning;
   }
 
   /* click -> find which timeline + square (or history square) */
@@ -1202,17 +1309,35 @@ class Board3DManager implements IBoard3D {
 
     const t = this._clock.getElapsedTime();
 
-    // Update WASD panning
-    this._updatePanning();
+    // FPS tracking
+    this._frameCount++;
+    if (t - this._lastFpsUpdate >= 1.0) {
+      this._currentFps = this._frameCount;
+      this._frameCount = 0;
+      this._lastFpsUpdate = t;
+      this._updateFpsDisplay();
+    }
+
+    // Update WASD panning (marks dirty if moving)
+    const wasPanning = this._updatePanning();
+    if (wasPanning) this._needsRender = true;
 
     // Update focus animation
-    this._updateFocusAnimation();
+    if (this._focusTween) {
+      this._updateFocusAnimation();
+      this._needsRender = true;
+    }
 
     // Update visual effects
-    this._updateEffects();
+    if (this._activeEffects.length > 0) {
+      this._updateEffects();
+      this._needsRender = true;
+    }
 
+    // Controls damping requires constant updates
     this.controls.update();
 
+    // Particle animation (runs always for ambient effect, but lightweight)
     if (this.particleSystem) {
       const pa = (this.particleSystem.geometry.attributes.position as BufferAttribute)
         .array as Float32Array;
@@ -1223,26 +1348,42 @@ class Board3DManager implements IBoard3D {
       this.particleSystem.rotation.y = t * 0.006;
     }
 
-    // Pulse branch lines
-    const pulse = 0.7 + 0.3 * Math.sin(t * 2);
-    this.branchLineGroup?.traverse((child: Object3D) => {
-      const mesh = child as Mesh;
-      if (mesh.isMesh && mesh.material && (mesh.material as Material).opacity <= 0.12) {
-        (mesh.material as Material).opacity = 0.1 * pulse;
-      }
-    });
-
-    // Pulse inter-layer lines per timeline
-    for (const key in this.timelineCols) {
-      this.timelineCols[key].interLayerGroup.traverse((child: Object3D) => {
+    // Pulse effects only need render every ~100ms, not every frame
+    const shouldPulse = t - this._lastRenderTime > 0.1;
+    if (shouldPulse && (this.branchLineGroup?.children.length || Object.keys(this.timelineCols).length > 0)) {
+      const pulse = 0.7 + 0.3 * Math.sin(t * 2);
+      this.branchLineGroup?.traverse((child: Object3D) => {
         const mesh = child as Mesh;
         if (mesh.isMesh && mesh.material && (mesh.material as Material).opacity <= 0.12) {
           (mesh.material as Material).opacity = 0.1 * pulse;
         }
       });
+
+      // Pulse inter-layer lines per timeline
+      for (const key in this.timelineCols) {
+        this.timelineCols[key].interLayerGroup.traverse((child: Object3D) => {
+          const mesh = child as Mesh;
+          if (mesh.isMesh && mesh.material && (mesh.material as Material).opacity <= 0.12) {
+            (mesh.material as Material).opacity = 0.1 * pulse;
+          }
+        });
+      }
+      this._needsRender = true;
     }
 
+    // Only render if something changed or we have active animations
+    // For now, always render but track FPS - can make this stricter later
     this.renderer.render(this.scene, this.camera);
+    this._lastRenderTime = t;
+    this._needsRender = false;
+  }
+
+  /** Update FPS display in UI */
+  private _updateFpsDisplay(): void {
+    const fpsEl = document.getElementById('fps-counter');
+    if (fpsEl) {
+      fpsEl.textContent = `${this._currentFps} FPS`;
+    }
   }
 
   /** Create portal effect at a position (cyan-purple burst) */
