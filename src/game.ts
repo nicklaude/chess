@@ -278,8 +278,13 @@ class GameManager {
     document.addEventListener('mousemove', (e: MouseEvent) => {
       if (!isResizing) return;
       const diff = startX - e.clientX; // Negative because sidebar is on right
-      const newWidth = Math.max(180, Math.min(400, startWidth + diff));
+      // Constrain to sensible limits based on viewport
+      const maxWidth = Math.min(500, window.innerWidth * 0.5);
+      const minWidth = 180;
+      const newWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + diff));
       sidebar.style.width = newWidth + 'px';
+      sidebar.style.minWidth = newWidth + 'px';
+      sidebar.style.maxWidth = newWidth + 'px';
     });
 
     document.addEventListener('mouseup', () => {
@@ -1629,6 +1634,36 @@ timelines - list timelines`,
       statusEl.textContent = prefix + turn + ' to move';
       statusEl.style.color = '#e0e0e0';
     }
+
+    // Update FEN display
+    this._updateFenDisplay();
+  }
+
+  private _updateFenDisplay(): void {
+    const fenText = document.getElementById('fen-text');
+    const fenTooltip = document.getElementById('fen-tooltip');
+    const fenDisplay = document.getElementById('fen-display');
+    if (!fenText || !fenTooltip || !fenDisplay) return;
+
+    const tl = this.timelines[this.activeTimelineId];
+    if (!tl) return;
+
+    const fen = tl.chess.fen();
+    fenText.textContent = fen;
+    fenTooltip.textContent = fen;
+
+    // Click to copy
+    fenDisplay.onclick = () => {
+      navigator.clipboard.writeText(fen).then(() => {
+        const original = fenTooltip.textContent;
+        fenTooltip.textContent = 'Copied!';
+        fenTooltip.style.color = '#6bc96b';
+        setTimeout(() => {
+          fenTooltip.textContent = original;
+          fenTooltip.style.color = '';
+        }, 1000);
+      });
+    };
   }
 
   updateMoveList(): void {
