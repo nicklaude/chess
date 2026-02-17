@@ -626,6 +626,8 @@ timelines - list timelines`,
         );
         return;
       }
+      // Clicked on a different timeline but not a valid target - clear selection
+      this.clearSelection();
     }
 
     // Clicking on a non-active timeline's current board -> switch to it
@@ -966,26 +968,28 @@ timelines - list timelines`,
     targetTl.chess.load(newTargetFen);
 
     // 3. Record the move in both timelines
+    // Use actual piece character (not hardcoded Q) for future extensibility
+    const pieceChar = piece.type.toUpperCase();
     const crossMove: Move = {
       from: square,
       to: square,
       piece: piece.type,
       captured: targetPiece?.type || null,
-      san: `Q${square}→T${targetTimelineId}`,  // Custom notation for cross-timeline
+      san: `${pieceChar}${square}→T${targetTimelineId}`,  // Custom notation for cross-timeline
       isWhite,
     };
 
     // Source timeline: piece left
     sourceTl.moveHistory.push({
       ...crossMove,
-      san: `Q${square}→T${targetTimelineId}`,
+      san: `${pieceChar}${square}→T${targetTimelineId}`,
     });
     sourceTl.snapshots.push(this._cloneBoard(sourceTl.chess));
 
     // Target timeline: piece arrived (possibly captured)
     targetTl.moveHistory.push({
       ...crossMove,
-      san: `Q${square}←T${sourceTimelineId}`,
+      san: `${pieceChar}${square}←T${sourceTimelineId}`,
     });
     targetTl.snapshots.push(this._cloneBoard(targetTl.chess));
 
@@ -1180,9 +1184,20 @@ timelines - list timelines`,
       console.error('[Time Travel] Failed to place piece at', targetSquare, piece);
     }
 
-    // Note: We don't flip the turn here because chess.load() would reject
-    // the 2-queen FEN. The turn tracking is handled by our moveHistory,
-    // and the opponent will play next on this timeline.
+    // Fix turn synchronization: After time travel arrival, it's the opponent's turn.
+    // We need to flip the turn in the FEN. Since chess.put() doesn't modify turn,
+    // we reload the FEN with the correct turn.
+    const currentFen = newTl.chess.fen();
+    const fenParts = currentFen.split(' ');
+    // After the time-traveling piece's color moves, it's the opponent's turn
+    fenParts[1] = isWhite ? 'b' : 'w';
+    // Reset en passant on new timeline (historical en passant no longer valid)
+    fenParts[3] = '-';
+    const fixedFen = fenParts.join(' ');
+    const loadResult = newTl.chess.load(fixedFen);
+    if (!loadResult) {
+      console.error('[Time Travel] Failed to load turn-fixed FEN:', fixedFen);
+    }
 
     console.log('[Time Travel] New timeline chess state:', newTl.chess.fen());
     console.log('[Time Travel] New timeline board:', newTl.chess.board());
@@ -1251,7 +1266,9 @@ timelines - list timelines`,
     }
   }
 
-  /** Helper: Modify a FEN string to change a square's piece and flip turn */
+  /** Helper: Modify a FEN string to change a square's piece and flip turn.
+   * Also updates castling rights and resets en passant for timeline consistency.
+   */
   private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean): string {
     const parts = fen.split(' ');
     const rows = parts[0].split('/');
@@ -1297,6 +1314,10 @@ timelines - list timelines`,
     }
     const rowArr = expandRow(rows[pos.r]);
     console.log('[_modifyFen] expanded row:', rowArr);
+
+    // Track what piece was there before
+    const oldPieceChar = rowArr[pos.c];
+
     if (newPiece) {
       const pieceChar = newPiece.color === 'w'
         ? newPiece.type.toUpperCase()
@@ -1307,9 +1328,54 @@ timelines - list timelines`,
     }
     rows[pos.r] = compressRow(rowArr);
 
-    // Flip turn
+    // Update board position
     parts[0] = rows.join('/');
+
+    // Flip turn
     parts[1] = whiteToMove ? 'w' : 'b';
+
+    // Update castling rights (parts[2]) - remove rights when rooks/kings move
+    let castling = parts[2] || '-';
+    if (castling !== '-') {
+      // If a rook or king is being removed (newPiece is null), update castling
+      if (!newPiece && oldPieceChar) {
+        const removedPiece = oldPieceChar.toLowerCase();
+        const isWhitePiece = oldPieceChar === oldPieceChar.toUpperCase();
+
+        if (removedPiece === 'k') {
+          // King removed - remove all castling rights for that color
+          if (isWhitePiece) {
+            castling = castling.replace(/[KQ]/g, '');
+          } else {
+            castling = castling.replace(/[kq]/g, '');
+          }
+        } else if (removedPiece === 'r') {
+          // Rook removed - check which corner
+          if (square === 'a1') castling = castling.replace('Q', '');
+          else if (square === 'h1') castling = castling.replace('K', '');
+          else if (square === 'a8') castling = castling.replace('q', '');
+          else if (square === 'h8') castling = castling.replace('k', '');
+        }
+      }
+      // If a piece is being placed on a rook square, also invalidate that castling
+      if (newPiece) {
+        if (square === 'a1') castling = castling.replace('Q', '');
+        else if (square === 'h1') castling = castling.replace('K', '');
+        else if (square === 'a8') castling = castling.replace('q', '');
+        else if (square === 'h8') castling = castling.replace('k', '');
+      }
+      if (castling === '') castling = '-';
+    }
+    parts[2] = castling;
+
+    // Always reset en passant on timeline branches/time travel
+    // (The historical en passant is no longer valid since a move was made)
+    parts[3] = '-';
+
+    // Reset halfmove clock if this was a capture (newPiece replaces something)
+    if (newPiece && oldPieceChar && oldPieceChar !== '') {
+      parts[4] = '0';
+    }
 
     const result = parts.join(' ');
 
