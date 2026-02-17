@@ -1,6 +1,22 @@
 const esbuild = require('esbuild');
+const fs = require('fs');
+const path = require('path');
 
 const isDev = process.argv.includes('--watch');
+
+// Read version from package.json
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const version = pkg.version;
+
+// Update version in index.html
+const indexPath = path.join(__dirname, 'index.html');
+let indexHtml = fs.readFileSync(indexPath, 'utf8');
+indexHtml = indexHtml.replace(
+  /<span id="version-info">v[\d.]+<\/span>/,
+  `<span id="version-info">v${version}</span>`
+);
+fs.writeFileSync(indexPath, indexHtml);
+console.log(`Version updated to v${version} in index.html`);
 
 const config = {
   entryPoints: ['src/main.ts'],
