@@ -29,6 +29,9 @@ body {
 
 #sidebar {
     width: 250px;
+    min-width: 250px;
+    max-width: 250px;
+    flex-shrink: 0;
     background: rgba(12, 12, 30, 0.95);
     backdrop-filter: blur(12px);
     border-left: 1px solid rgba(80, 80, 160, 0.2);
@@ -37,6 +40,7 @@ body {
     padding: 1.25rem;
     gap: 0.75rem;
     z-index: 10;
+    overflow-y: auto;
 }
 
 #status {
@@ -214,23 +218,204 @@ body {
     transform: scale(1.05);
 }
 
+/* Move slider */
+#move-slider-container {
+    background: rgba(35, 35, 65, 0.4);
+    border-radius: 10px;
+    padding: 0.75rem;
+    border: 1px solid rgba(80, 80, 160, 0.15);
+}
+
+#move-slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(80, 80, 160, 0.3);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+}
+
+#move-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #6688cc;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+}
+
+#move-slider::-webkit-slider-thumb:hover {
+    background: #88aaee;
+    transform: scale(1.15);
+}
+
+#move-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #6688cc;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+}
+
+#move-slider-label {
+    font-size: 0.75rem;
+    text-align: center;
+    color: #8888bb;
+    margin-top: 0.5rem;
+    transition: color 0.2s;
+}
+
+#move-slider-label.viewing-history {
+    color: #ffaa44;
+    font-weight: 600;
+}
+
+/* Timeline branch indicators */
+.tl-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.tl-label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.tl-branch-count {
+    font-size: 0.65rem;
+    color: #66ddaa;
+    background: rgba(102, 221, 170, 0.15);
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.tl-parent {
+    font-size: 0.65rem;
+    color: #8888aa;
+    margin-top: 0.1rem;
+}
+
+.tl-item.has-branches {
+    border-left: 2px solid rgba(102, 221, 170, 0.4);
+    padding-left: calc(0.5rem - 2px);
+}
+
+.tl-item.connected-highlight {
+    background: rgba(100, 180, 255, 0.2);
+    box-shadow: 0 0 8px rgba(100, 180, 255, 0.3);
+}
+
+/* Move list highlighting */
+.move-pair.current-move {
+    background: rgba(100, 140, 200, 0.25);
+    border-radius: 4px;
+}
+
+.move-pair.future-move {
+    opacity: 0.4;
+}
+
+/* Keyboard shortcuts panel */
+#shortcuts-panel {
+    background: rgba(35, 35, 65, 0.4);
+    border-radius: 10px;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid rgba(80, 80, 160, 0.15);
+    font-size: 0.72rem;
+}
+
+#shortcuts-header {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #666688;
+    margin-bottom: 0.4rem;
+}
+
+.shortcut-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.2rem 0;
+    color: #888899;
+}
+
+.shortcut-row .key {
+    font-family: 'Courier New', monospace;
+    font-size: 0.68rem;
+    background: rgba(60, 60, 100, 0.5);
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    color: #aaaacc;
+    font-weight: 600;
+    min-width: 60px;
+    text-align: center;
+}
+
+/* Medium screens - slightly smaller sidebar */
+@media (max-width: 1000px) {
+    #sidebar {
+        width: 220px;
+        min-width: 220px;
+        max-width: 220px;
+        padding: 1rem;
+    }
+}
+
+/* Small screens - stack vertically */
 @media (max-width: 700px) {
     #app {
         flex-direction: column;
     }
     #scene-container {
-        height: 55vh;
+        flex: 1;
+        min-height: 50vh;
     }
     #sidebar {
         width: 100%;
-        height: 45vh;
+        min-width: 100%;
+        max-width: 100%;
+        height: auto;
+        max-height: 45vh;
         border-left: none;
         border-top: 1px solid rgba(80, 80, 160, 0.2);
+        flex-shrink: 0;
     }
 
     .promo-options button {
         width: 56px;
         height: 56px;
         font-size: 2.2rem;
+    }
+
+    #shortcuts-panel {
+        display: none;
+    }
+}
+
+/* Very small screens */
+@media (max-width: 400px) {
+    #sidebar {
+        padding: 0.75rem;
+        gap: 0.5rem;
+    }
+
+    #status {
+        font-size: 1rem;
+        padding: 0.5rem;
+    }
+
+    .tl-item {
+        font-size: 0.75rem;
     }
 }

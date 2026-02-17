@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>4D Chess</title>
+    <title>6D Chess</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -17,6 +17,17 @@
             </div>
             <div id="moves"></div>
             <button id="reset">New Game</button>
+            <div id="shortcuts-panel">
+                <div id="shortcuts-header">Keyboard Shortcuts</div>
+                <div class="shortcut-row"><span class="key">W A S D</span> Pan camera</div>
+                <div class="shortcut-row"><span class="key">Q / E</span> Zoom out/in</div>
+                <div class="shortcut-row"><span class="key">Space</span> Flip board</div>
+                <div class="shortcut-row"><span class="key">F</span> Focus timeline</div>
+                <div class="shortcut-row"><span class="key">R</span> Reset camera</div>
+                <div class="shortcut-row"><span class="key">Tab</span> Cycle timelines</div>
+                <div class="shortcut-row"><span class="key">Arrows</span> Navigate moves</div>
+                <div class="shortcut-row"><span class="key">Home / End</span> First/last move</div>
+            </div>
         </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>

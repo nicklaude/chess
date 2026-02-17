@@ -1,4 +1,4 @@
-/* 4D Chess – multiverse game controller with timeline branching */
+/* 6D Chess – multiverse game controller with timeline branching */
 var Game = {
     timelines: {},
     activeTimelineId: 0,
@@ -6,6 +6,7 @@ var Game = {
     selected: null,
     selectedTimelineId: null,
     pendingPromotion: null, // { tlId, move } - awaiting promotion choice
+    viewingMoveIndex: null, // null = current position, number = viewing history at that move index
 
     init: function () {
         var self = this;
@@ -15,12 +16,208 @@ var Game = {
             self.reset();
         });
 
+        // Setup keyboard navigation
+        this._setupKeyboardNav();
+
+        // Setup move slider
+        this._setupMoveSlider();
+
         // Create the main timeline
         this._createTimeline(0, 0, null, -1, null);
         this.setActiveTimeline(0);
         this.renderTimeline(0);
         this.updateStatus();
         this.updateTimelineList();
+    },
+
+    /* ── Keyboard Navigation ── */
+    _setupKeyboardNav: function () {
+        var self = this;
+        document.addEventListener('keydown', function (e) {
+            // Don't capture if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            switch (e.key) {
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    self.navigateMove(-1);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    self.navigateMove(1);
+                    break;
+                case 'Tab':
+                    e.preventDefault();
+                    self.cycleTimeline(e.shiftKey ? -1 : 1);
+                    break;
+                case ' ':
+                    e.preventDefault();
+                    self.flipBoard();
+                    break;
+                case 'Home':
+                    e.preventDefault();
+                    self.goToMove(0);
+                    break;
+                case 'End':
+                    e.preventDefault();
+                    self.goToMove(-1); // -1 = last move
+                    break;
+                case 'f':
+                case 'F':
+                    e.preventDefault();
+                    self.focusActiveTimeline();
+                    break;
+                case 'r':
+                case 'R':
+                    e.preventDefault();
+                    self.resetCameraView();
+                    break;
+            }
+        });
+    },
+
+    /* ── Move Slider ── */
+    _setupMoveSlider: function () {
+        var self = this;
+        var sliderContainer = document.createElement('div');
+        sliderContainer.id = 'move-slider-container';
+        sliderContainer.innerHTML =
+            '<input type="range" id="move-slider" min="0" max="0" value="0">' +
+            '<div id="move-slider-label">Move 0/0</div>';
+
+        // Insert before the moves panel
+        var movesEl = document.getElementById('moves');
+        movesEl.parentNode.insertBefore(sliderContainer, movesEl);
+
+        var slider = document.getElementById('move-slider');
+        slider.addEventListener('input', function () {
+            self.goToMove(parseInt(this.value));
+        });
+    },
+
+    _updateMoveSlider: function () {
+        var slider = document.getElementById('move-slider');
+        var label = document.getElementById('move-slider-label');
+        var tl = this.timelines[this.activeTimelineId];
+        if (!tl || !slider || !label) return;
+
+        var totalMoves = tl.moveHistory.length;
+        var currentMove = this.viewingMoveIndex !== null ? this.viewingMoveIndex : totalMoves;
+
+        slider.max = totalMoves;
+        slider.value = currentMove;
+        label.textContent = 'Move ' + currentMove + '/' + totalMoves;
+
+        // Visual indicator when not at current position
+        if (this.viewingMoveIndex !== null && this.viewingMoveIndex < totalMoves) {
+            label.classList.add('viewing-history');
+        } else {
+            label.classList.remove('viewing-history');
+        }
+    },
+
+    /* ── Navigation Methods ── */
+    navigateMove: function (delta) {
+        var tl = this.timelines[this.activeTimelineId];
+        if (!tl) return;
+
+        var totalMoves = tl.moveHistory.length;
+        var currentMove = this.viewingMoveIndex !== null ? this.viewingMoveIndex : totalMoves;
+        var newMove = Math.max(0, Math.min(totalMoves, currentMove + delta));
+
+        this.goToMove(newMove);
+    },
+
+    goToMove: function (moveIndex) {
+        var tl = this.timelines[this.activeTimelineId];
+        if (!tl) return;
+
+        var totalMoves = tl.moveHistory.length;
+
+        // -1 means go to last move (current position)
+        if (moveIndex === -1) moveIndex = totalMoves;
+
+        // Clamp to valid range
+        moveIndex = Math.max(0, Math.min(totalMoves, moveIndex));
+
+        // If at current position, clear viewing mode
+        if (moveIndex === totalMoves) {
+            this.viewingMoveIndex = null;
+            this.renderTimeline(this.activeTimelineId);
+        } else {
+            this.viewingMoveIndex = moveIndex;
+            // Render the board at that snapshot
+            var snapshot = tl.snapshots[moveIndex];
+            var board = this._getSnapshotBoard(snapshot);
+            Board3D.getTimeline(this.activeTimelineId).render(board);
+        }
+
+        this._updateMoveSlider();
+        this.updateStatus();
+        this._highlightCurrentMoveInList();
+    },
+
+    _highlightCurrentMoveInList: function () {
+        var movesEl = document.getElementById('moves');
+        var pairs = movesEl.querySelectorAll('.move-pair');
+        var tl = this.timelines[this.activeTimelineId];
+        if (!tl) return;
+
+        var totalMoves = tl.moveHistory.length;
+        var viewingMove = this.viewingMoveIndex !== null ? this.viewingMoveIndex : totalMoves;
+
+        pairs.forEach(function (pair, idx) {
+            var pairStartMove = idx * 2 + 1; // Move 1 is at pair 0
+            var pairEndMove = idx * 2 + 2;
+
+            if (viewingMove >= pairStartMove && viewingMove <= pairEndMove) {
+                pair.classList.add('current-move');
+            } else if (viewingMove < pairStartMove) {
+                pair.classList.add('future-move');
+            } else {
+                pair.classList.remove('current-move', 'future-move');
+            }
+        });
+    },
+
+    cycleTimeline: function (direction) {
+        var ids = Object.keys(this.timelines).map(Number).sort(function (a, b) { return a - b; });
+        if (ids.length <= 1) return;
+
+        var currentIdx = ids.indexOf(this.activeTimelineId);
+        var newIdx = (currentIdx + direction + ids.length) % ids.length;
+        this.setActiveTimeline(ids[newIdx]);
+    },
+
+    flipBoard: function () {
+        // Toggle camera position to flip perspective
+        if (Board3D.controls) {
+            var camera = Board3D.camera;
+            var target = Board3D.controls.target;
+
+            // Rotate camera 180 degrees around the Y axis relative to target
+            var dx = camera.position.x - target.x;
+            var dz = camera.position.z - target.z;
+
+            camera.position.x = target.x - dx;
+            camera.position.z = target.z - dz;
+
+            Board3D.controls.update();
+        }
+    },
+
+    focusActiveTimeline: function () {
+        Board3D.focusTimeline(this.activeTimelineId, true);
+    },
+
+    resetCameraView: function () {
+        // Reset to default camera position centered on active timeline
+        var tl = this.timelines[this.activeTimelineId];
+        var targetX = tl ? tl.xOffset : 0;
+
+        Board3D.camera.position.set(targetX, 14, 12);
+        Board3D.controls.target.set(targetX, 0, 0);
+        Board3D.controls.update();
     },
 
     /* ── Timeline management ── */
@@ -53,12 +250,20 @@ var Game = {
     getTimeline: function (id) { return this.timelines[id]; },
 
     setActiveTimeline: function (id) {
+        var previousId = this.activeTimelineId;
         this.activeTimelineId = id;
+        this.viewingMoveIndex = null; // Reset to current position when switching timelines
         Board3D.setActiveTimeline(id);
         this.clearSelection();
         this.updateStatus();
         this.updateMoveList();
         this.updateTimelineList();
+        this._updateMoveSlider();
+
+        // Auto-focus on the new timeline with animation (if switching timelines)
+        if (previousId !== id) {
+            Board3D.focusTimeline(id, true);
+        }
     },
 
     /* ── Click handling ── */
@@ -215,7 +420,6 @@ var Game = {
         }
 
         // Add branch connection line
-        var historyTurn = parentTl.snapshots.length - 2 - (parentTl.snapshots.length - 1 - snapshotIdx);
         Board3D.addBranchLine(parentTlId, Math.max(0, parentTl.moveHistory.length - snapshotIdx - 1), newId);
 
         // Switch to the new timeline
@@ -285,6 +489,7 @@ var Game = {
         this.updateStatus();
         this.updateMoveList();
         this.updateTimelineList();
+        this._updateMoveSlider();
     },
 
     /* ── Promotion UI ── */
@@ -476,6 +681,16 @@ var Game = {
         var self = this;
         var colors = Board3D.TIMELINE_COLORS;
 
+        // Build parent-child relationships
+        var childrenOf = {}; // parentId -> [childIds]
+        for (var key in this.timelines) {
+            var tl = this.timelines[key];
+            if (tl.parentId !== null) {
+                if (!childrenOf[tl.parentId]) childrenOf[tl.parentId] = [];
+                childrenOf[tl.parentId].push(tl.id);
+            }
+        }
+
         for (var key in this.timelines) {
             var tl = this.timelines[key];
             var id = tl.id;
@@ -484,22 +699,119 @@ var Game = {
             var hexColor = '#' + color.toString(16).padStart(6, '0');
             var turnCount = tl.chess.history().length;
 
+            // Check if this timeline has children (is a branch point)
+            var hasChildren = childrenOf[id] && childrenOf[id].length > 0;
+            var branchCount = hasChildren ? childrenOf[id].length : 0;
+
+            // Build branch indicator
+            var branchIndicator = '';
+            if (hasChildren) {
+                branchIndicator = '<span class="tl-branch-count" title="' + branchCount + ' branch(es)">' +
+                    '⑂' + branchCount + '</span>';
+            }
+
+            // Show parent info for child timelines
+            var parentInfo = '';
+            if (tl.parentId !== null) {
+                var parentTl = this.timelines[tl.parentId];
+                var parentName = parentTl ? parentTl.name : 'Unknown';
+                parentInfo = '<span class="tl-parent" title="Branched from ' + parentName +
+                    ' at move ' + tl.branchTurn + '">↳ ' + parentName + '@' + tl.branchTurn + '</span>';
+            }
+
             html += '<div class="tl-item' + (isActive ? ' active' : '') +
-                '" data-tl-id="' + id + '">' +
+                (hasChildren ? ' has-branches' : '') +
+                '" data-tl-id="' + id + '" data-children="' + (childrenOf[id] || []).join(',') + '">' +
                 '<span class="tl-dot" style="background:' + hexColor + '"></span>' +
-                '<span class="tl-label">' + tl.name + '</span>' +
-                '<span class="tl-turn">' + turnCount + ' moves</span></div>';
+                '<div class="tl-info">' +
+                '<span class="tl-label">' + tl.name + branchIndicator + '</span>' +
+                parentInfo +
+                '</div>' +
+                '<span class="tl-turn">' + turnCount + '</span></div>';
         }
 
         listEl.innerHTML = html;
 
-        // Attach click handlers
+        // Attach click and hover handlers
         var items = listEl.querySelectorAll('.tl-item');
         for (var i = 0; i < items.length; i++) {
-            items[i].addEventListener('click', (function (tlId) {
-                return function () { self.setActiveTimeline(tlId); };
-            })(parseInt(items[i].dataset.tlId)));
+            (function (item) {
+                var tlId = parseInt(item.dataset.tlId);
+
+                // Click to select timeline
+                item.addEventListener('click', function () {
+                    self.setActiveTimeline(tlId);
+                });
+
+                // Hover to highlight connected timelines
+                item.addEventListener('mouseenter', function () {
+                    self._highlightConnectedTimelines(tlId, true);
+                });
+
+                item.addEventListener('mouseleave', function () {
+                    self._highlightConnectedTimelines(tlId, false);
+                });
+            })(items[i]);
         }
+    },
+
+    /* ── Branch Point Indicators ── */
+    _highlightConnectedTimelines: function (tlId, highlight) {
+        var tl = this.timelines[tlId];
+        if (!tl) return;
+
+        // Find all connected timelines (parent and children)
+        var connected = [];
+
+        // Add parent
+        if (tl.parentId !== null) {
+            connected.push(tl.parentId);
+        }
+
+        // Add children
+        for (var key in this.timelines) {
+            var other = this.timelines[key];
+            if (other.parentId === tlId) {
+                connected.push(other.id);
+            }
+        }
+
+        // Highlight/unhighlight in UI
+        var listEl = document.getElementById('timeline-list');
+        connected.forEach(function (connectedId) {
+            var item = listEl.querySelector('[data-tl-id="' + connectedId + '"]');
+            if (item) {
+                if (highlight) {
+                    item.classList.add('connected-highlight');
+                } else {
+                    item.classList.remove('connected-highlight');
+                }
+            }
+        });
+
+        // Highlight in 3D view
+        connected.forEach(function (connectedId) {
+            var col = Board3D.getTimeline(connectedId);
+            if (col) {
+                col.setHighlighted(highlight);
+            }
+        });
+    },
+
+    /* ── Get branch points for a timeline ── */
+    getBranchPoints: function (tlId) {
+        var branches = [];
+        for (var key in this.timelines) {
+            var tl = this.timelines[key];
+            if (tl.parentId === tlId) {
+                branches.push({
+                    childId: tl.id,
+                    moveIndex: tl.branchTurn,
+                    name: tl.name
+                });
+            }
+        }
+        return branches;
     },
 
     /* ── Reset ── */

@@ -1,4 +1,4 @@
-/* Three.js 3D Chess – multiverse with timeline branching */
+/* Three.js 6D Chess – multiverse with timeline branching */
 
 /* ── Timeline column (one per timeline) ── */
 function TimelineCol(scene, id, xOffset, tintColor, texCache, pieceChars, pieceTex) {
@@ -209,6 +209,7 @@ TimelineCol.prototype._makeHistoryBoard = function (position) {
         new THREE.BoxGeometry(8.2, 0.03, 8.2),
         new THREE.MeshStandardMaterial({ color: 0x15152a, transparent: true, opacity: 0.25, metalness: 0.5, roughness: 0.5 })
     );
+    base.position.y = -0.02; // Slightly below squares to prevent z-fighting
     g.add(base);
 
     for (var r = 0; r < 8; r++) {
@@ -314,6 +315,22 @@ TimelineCol.prototype.setActive = function (active) {
     });
 };
 
+TimelineCol.prototype.setHighlighted = function (highlighted) {
+    // Add glow effect to the board base when highlighted
+    var self = this;
+    this.group.children.forEach(function (child) {
+        if (child.geometry && child.geometry.type === 'BoxGeometry' &&
+            child.geometry.parameters.width > 8.5 && child.position.y < -0.1) {
+            if (highlighted) {
+                child.material.emissive = new THREE.Color(0x446688);
+            } else {
+                // Reset to default (check if active)
+                child.material.emissive = new THREE.Color(0);
+            }
+        }
+    });
+};
+
 TimelineCol.prototype.clearAll = function () {
     var i;
     for (i = 0; i < this.historyLayers.length; i++) this.group.remove(this.historyLayers[i]);
@@ -377,11 +394,20 @@ var Board3D = {
 
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.06;
+        this.controls.dampingFactor = 0.08;
+        this.controls.rotateSpeed = 0.7;
+        this.controls.panSpeed = 0.8;
+        this.controls.zoomSpeed = 1.2;
         this.controls.minDistance = 5;
         this.controls.maxDistance = 80;
         this.controls.maxPolarAngle = Math.PI * 0.85;
         this.controls.target.set(0, 0, 0);
+        this.controls.screenSpacePanning = true;
+
+        // WASD panning state and Q/E zoom
+        this._panKeys = { w: false, a: false, s: false, d: false, q: false, e: false };
+        this._panSpeed = 0.25;
+        this._zoomSpeed = 0.4;
 
         this._setupLights();
         this.branchLineGroup = new THREE.Group();
@@ -401,6 +427,11 @@ var Board3D = {
             self._downPos = null;
         });
         window.addEventListener('resize', function () { self._onResize(); });
+
+        // WASD keyboard panning
+        window.addEventListener('keydown', function (e) { self._onKeyDown(e); });
+        window.addEventListener('keyup', function (e) { self._onKeyUp(e); });
+
         this._animate();
     },
 
@@ -441,6 +472,60 @@ var Board3D = {
     setActiveTimeline: function (id) {
         for (var key in this.timelineCols) {
             this.timelineCols[key].setActive(parseInt(key) === id);
+        }
+    },
+
+    /* Smoothly pan camera to center on a timeline */
+    focusTimeline: function (id, animate) {
+        var col = this.timelineCols[id];
+        if (!col) return;
+
+        var targetX = col.xOffset;
+        var currentTarget = this.controls.target.clone();
+        var newTarget = new THREE.Vector3(targetX, 0, 0);
+
+        if (animate) {
+            // Cancel any existing animation and start fresh
+            var startTime = this._clock.getElapsedTime();
+            var duration = 0.4; // seconds
+
+            this._focusTween = {
+                start: currentTarget,
+                end: newTarget,
+                startTime: startTime,
+                duration: duration
+            };
+        } else {
+            // Immediate snap
+            var delta = new THREE.Vector3().subVectors(newTarget, currentTarget);
+            this.controls.target.add(delta);
+            this.camera.position.add(delta);
+        }
+    },
+
+    /* Update focus animation in render loop */
+    _updateFocusAnimation: function () {
+        if (!this._focusTween) return;
+
+        var t = this._clock.getElapsedTime();
+        var elapsed = t - this._focusTween.startTime;
+        var progress = Math.min(elapsed / this._focusTween.duration, 1);
+
+        // Ease out cubic
+        var eased = 1 - Math.pow(1 - progress, 3);
+
+        var newTarget = new THREE.Vector3().lerpVectors(
+            this._focusTween.start,
+            this._focusTween.end,
+            eased
+        );
+
+        var delta = new THREE.Vector3().subVectors(newTarget, this.controls.target);
+        this.controls.target.add(delta);
+        this.camera.position.add(delta);
+
+        if (progress >= 1) {
+            this._focusTween = undefined;
         }
     },
 
@@ -552,6 +637,71 @@ var Board3D = {
         return group;
     },
 
+    /* WASD keyboard panning handlers */
+    _onKeyDown: function (e) {
+        // Don't capture if typing in an input
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        var key = e.key.toLowerCase();
+        if (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === 'q' || key === 'e') {
+            e.preventDefault();
+            this._panKeys[key] = true;
+        }
+    },
+
+    _onKeyUp: function (e) {
+        var key = e.key.toLowerCase();
+        if (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === 'q' || key === 'e') {
+            this._panKeys[key] = false;
+        }
+    },
+
+    _updatePanning: function () {
+        if (!this._panKeys) return;
+
+        var panX = 0, panZ = 0;
+        if (this._panKeys.w) panZ -= this._panSpeed;
+        if (this._panKeys.s) panZ += this._panSpeed;
+        if (this._panKeys.a) panX -= this._panSpeed;
+        if (this._panKeys.d) panX += this._panSpeed;
+
+        if (panX !== 0 || panZ !== 0) {
+            // Get camera's forward and right vectors projected onto XZ plane
+            var forward = new THREE.Vector3();
+            this.camera.getWorldDirection(forward);
+            forward.y = 0;
+            forward.normalize();
+
+            var right = new THREE.Vector3();
+            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+            // Calculate movement
+            var move = new THREE.Vector3();
+            move.addScaledVector(forward, -panZ);
+            move.addScaledVector(right, panX);
+
+            // Apply to both camera and target
+            this.camera.position.add(move);
+            this.controls.target.add(move);
+        }
+
+        // Q/E keyboard zoom
+        if (this._panKeys.q || this._panKeys.e) {
+            var zoomDir = this._panKeys.e ? -1 : 1; // E = zoom in, Q = zoom out
+            var direction = new THREE.Vector3();
+            direction.subVectors(this.camera.position, this.controls.target).normalize();
+
+            var distance = this.camera.position.distanceTo(this.controls.target);
+            var zoomAmount = this._zoomSpeed * zoomDir;
+
+            // Respect min/max distance
+            var newDistance = distance + zoomAmount;
+            if (newDistance >= this.controls.minDistance && newDistance <= this.controls.maxDistance) {
+                this.camera.position.addScaledVector(direction, zoomAmount);
+            }
+        }
+    },
+
     /* click → find which timeline + square (or history square) */
     _onClick: function (event) {
         var rect = this.renderer.domElement.getBoundingClientRect();
@@ -587,6 +737,13 @@ var Board3D = {
         var self = this;
         requestAnimationFrame(function () { self._animate(); });
         var t = this._clock.getElapsedTime();
+
+        // Update WASD panning
+        this._updatePanning();
+
+        // Update focus animation
+        this._updateFocusAnimation();
+
         this.controls.update();
 
         if (this.particleSystem) {
