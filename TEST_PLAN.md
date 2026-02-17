@@ -126,30 +126,48 @@ Prerequisites: Create 2+ timelines via time travel
 - [ ] Original timeline state unchanged
 - [ ] Can continue playing on both timelines
 
-## Phase 5: CPU Auto-Play Mode (Coming Soon)
+## Phase 5: CPU Auto-Play Mode
 
-### Test 5.1: CPU Mode Button
-- [ ] "CPU Mode" button visible in sidebar
-- [ ] Clicking starts CPU vs CPU game
+### Test 5.1: CPU UI Controls
+- [ ] "Start CPU" button visible in sidebar button row
+- [ ] Clicking toggles to "Stop CPU" when active (green highlight)
+- [ ] Speed slider visible (100-2000ms range)
+- [ ] Portal bias slider visible (0-100% range)
+- [ ] "Camera Follow: ON/OFF" toggle button visible
 
 ### Test 5.2: Basic CPU Play
-- [ ] CPU makes legal moves automatically
-- [ ] Move pace is visible (not instant)
-- [ ] Both white and black move automatically
+- [ ] Click "Start CPU" → moves happen automatically
+- [ ] Both white and black move (alternating)
+- [ ] Move pace matches speed slider value
+- [ ] Click "Stop CPU" → moves stop immediately
 
-### Test 5.3: Portal Awareness
-- [ ] CPU considers time travel portals when queen is available
-- [ ] CPU sometimes uses time travel to create new timelines
-- [ ] CPU can spawn multiple queens via time travel
+### Test 5.3: Speed Control
+- [ ] Drag speed slider left (100ms) → moves are very fast
+- [ ] Drag speed slider right (2000ms) → moves are slow
+- [ ] Speed changes take effect immediately
 
-### Test 5.4: Cross-Timeline Awareness
-- [ ] CPU considers cross-timeline moves when available
-- [ ] CPU can move pieces between timelines
+### Test 5.4: Portal Awareness
+- [ ] Set portal bias to 100% → CPU uses time travel frequently
+- [ ] Set portal bias to 0% → CPU never uses time travel
+- [ ] CPU creates new timelines via queen time travel
+- [ ] Timeline limit (10 max) prevents infinite branching
+- [ ] Console shows "[CPU] Time traveling!" when portal used
 
-### Test 5.5: Game Completion
-- [ ] Game continues until checkmate/draw
-- [ ] All timelines can reach completion
-- [ ] Multiple timelines can have different outcomes
+### Test 5.5: Camera Follow
+- [ ] Camera Follow ON → camera smoothly animates to active timeline
+- [ ] Click "Camera Follow: OFF" → camera stays in place
+- [ ] Pan manually (drag) → camera follow auto-disables
+- [ ] Camera follow toggle button reflects current state
+
+### Test 5.6: Multi-Timeline Play
+- [ ] CPU plays on multiple timelines when they exist
+- [ ] CPU switches between timelines (visible in sidebar highlight)
+- [ ] Game continues even after checkmate on one timeline
+- [ ] All playable timelines get CPU moves
+
+### Test 5.7: Capture Preference
+- [ ] CPU tends to capture pieces when available (~70%)
+- [ ] CPU doesn't always capture (some randomness)
 
 ## Error Handling
 

@@ -440,6 +440,57 @@ body {
     color: #88ddff;
 }
 
+/* Per-color CPU controls */
+.cpu-color-controls {
+    background: rgba(40, 40, 70, 0.4);
+    border-radius: 6px;
+    padding: 0.5rem;
+    margin-top: 0.3rem;
+}
+
+.cpu-color-header {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.cpu-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.cpu-color-dot.white {
+    background: #f0ece0;
+    border: 1px solid #888;
+}
+
+.cpu-color-dot.black {
+    background: #303048;
+    border: 1px solid #aaa;
+}
+
+.cpu-color-toggle {
+    margin-left: auto;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+    background: rgba(100, 60, 60, 0.4);
+    border: 1px solid rgba(160, 80, 80, 0.3);
+    border-radius: 4px;
+    color: #bb8888;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cpu-color-toggle.active {
+    background: rgba(60, 100, 60, 0.4);
+    border-color: rgba(80, 160, 80, 0.5);
+    color: #88bb88;
+}
+
 /* Medium screens - slightly smaller sidebar */
 @media (max-width: 1000px) {
     #sidebar {

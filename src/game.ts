@@ -151,18 +151,57 @@ class GameManager {
       });
     }
 
-    const portalSlider = document.getElementById('cpu-portal') as HTMLInputElement | null;
-    if (portalSlider) {
-      portalSlider.addEventListener('input', () => {
-        this.cpuSetPortalBias(parseInt(portalSlider.value) / 100);
-      });
-    }
-
     const cameraToggle = document.getElementById('cpu-camera-toggle');
     if (cameraToggle) {
       cameraToggle.addEventListener('click', () => {
         this.cpuCameraFollow = !this.cpuCameraFollow;
         this._updateCpuUI();
+      });
+    }
+
+    // White CPU controls
+    const whiteToggle = document.getElementById('cpu-white-toggle');
+    if (whiteToggle) {
+      whiteToggle.addEventListener('click', () => {
+        this.cpuWhiteEnabled = !this.cpuWhiteEnabled;
+        this._updateCpuUI();
+      });
+    }
+
+    const whitePortal = document.getElementById('cpu-white-portal') as HTMLInputElement | null;
+    if (whitePortal) {
+      whitePortal.addEventListener('input', () => {
+        this.cpuSetWhitePortalBias(parseInt(whitePortal.value) / 100);
+      });
+    }
+
+    const whiteCapture = document.getElementById('cpu-white-capture') as HTMLInputElement | null;
+    if (whiteCapture) {
+      whiteCapture.addEventListener('input', () => {
+        this.cpuSetWhiteCapturePreference(parseInt(whiteCapture.value) / 100);
+      });
+    }
+
+    // Black CPU controls
+    const blackToggle = document.getElementById('cpu-black-toggle');
+    if (blackToggle) {
+      blackToggle.addEventListener('click', () => {
+        this.cpuBlackEnabled = !this.cpuBlackEnabled;
+        this._updateCpuUI();
+      });
+    }
+
+    const blackPortal = document.getElementById('cpu-black-portal') as HTMLInputElement | null;
+    if (blackPortal) {
+      blackPortal.addEventListener('input', () => {
+        this.cpuSetBlackPortalBias(parseInt(blackPortal.value) / 100);
+      });
+    }
+
+    const blackCapture = document.getElementById('cpu-black-capture') as HTMLInputElement | null;
+    if (blackCapture) {
+      blackCapture.addEventListener('input', () => {
+        this.cpuSetBlackCapturePreference(parseInt(blackCapture.value) / 100);
       });
     }
 
@@ -1630,6 +1669,10 @@ timelines - list timelines`,
 
   /* -- Reset -- */
   reset(): void {
+    // Stop CPU if running
+    this.cpuStop();
+    this.cpuGlobalTurn = 'w';
+
     Board3D.clearAll();
     this.timelines = {};
     this.nextTimelineId = 1;
@@ -1653,9 +1696,17 @@ timelines - list timelines`,
   private cpuEnabled = false;
   private cpuTimer: number | null = null;
   private cpuMoveDelay = 400;  // ms between moves (faster for visual effect)
-  private cpuPortalBias = 0.3; // 30% chance to use portal when available
   private maxTimelines = 10;   // Limit timeline creation
   private cpuCameraFollow = true;  // Auto-follow moves with camera
+  private cpuGlobalTurn: PieceColor = 'w';  // Track whose turn globally (independent of per-timeline state)
+
+  // Per-color CPU settings
+  private cpuWhiteEnabled = true;
+  private cpuBlackEnabled = true;
+  private cpuWhitePortalBias = 0.3;
+  private cpuBlackPortalBias = 0.3;
+  private cpuWhiteCapturePreference = 0.7;
+  private cpuBlackCapturePreference = 0.7;
 
   /** Start CPU auto-play mode */
   cpuStart(): void {
@@ -1689,68 +1740,107 @@ timelines - list timelines`,
     this.cpuMoveDelay = Math.max(100, Math.min(2000, ms));
   }
 
-  /** Set portal bias (0-1) */
-  cpuSetPortalBias(bias: number): void {
-    this.cpuPortalBias = Math.max(0, Math.min(1, bias));
-  }
-
   /** Toggle camera follow mode */
   cpuSetCameraFollow(follow: boolean): void {
     this.cpuCameraFollow = follow;
     this._updateCpuUI();
   }
 
+  /** Set white CPU enabled */
+  cpuSetWhiteEnabled(enabled: boolean): void {
+    this.cpuWhiteEnabled = enabled;
+    this._updateCpuUI();
+  }
+
+  /** Set black CPU enabled */
+  cpuSetBlackEnabled(enabled: boolean): void {
+    this.cpuBlackEnabled = enabled;
+    this._updateCpuUI();
+  }
+
+  /** Set white portal bias (0-1) */
+  cpuSetWhitePortalBias(bias: number): void {
+    this.cpuWhitePortalBias = Math.max(0, Math.min(1, bias));
+  }
+
+  /** Set black portal bias (0-1) */
+  cpuSetBlackPortalBias(bias: number): void {
+    this.cpuBlackPortalBias = Math.max(0, Math.min(1, bias));
+  }
+
+  /** Set white capture preference (0-1) */
+  cpuSetWhiteCapturePreference(pref: number): void {
+    this.cpuWhiteCapturePreference = Math.max(0, Math.min(1, pref));
+  }
+
+  /** Set black capture preference (0-1) */
+  cpuSetBlackCapturePreference(pref: number): void {
+    this.cpuBlackCapturePreference = Math.max(0, Math.min(1, pref));
+  }
+
   /** Main CPU tick - called repeatedly while enabled */
   private _cpuTick(): void {
     if (!this.cpuEnabled) return;
 
-    // Find a timeline where we can play (no game over check - fight continues!)
-    const tlId = this._cpuSelectTimeline();
-    if (tlId === -1) {
-      // No playable timelines - all are in checkmate/stalemate
-      // Keep ticking in case new timelines are created via time travel
+    // Check if this color's CPU is enabled
+    const isWhiteTurn = this.cpuGlobalTurn === 'w';
+    const cpuActiveForColor = isWhiteTurn ? this.cpuWhiteEnabled : this.cpuBlackEnabled;
+
+    if (!cpuActiveForColor) {
+      // This color's CPU is disabled, flip turn and continue
+      this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
       this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
       return;
     }
 
-    // Make a move on that timeline
+    // Find ALL playable timelines for current color and make moves on each
+    const playableTimelines = this._cpuGetPlayableTimelines();
+
+    if (playableTimelines.length === 0) {
+      // No playable timelines - flip turn and keep ticking
+      this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
+      this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
+      return;
+    }
+
+    // Make a move on ONE random playable timeline (to keep pace reasonable)
+    const tlId = playableTimelines[Math.floor(Math.random() * playableTimelines.length)];
     const moved = this._cpuMakeMove(tlId);
-    if (!moved) {
-      console.log('[CPU] Could not make move on timeline', tlId);
+
+    if (moved) {
+      // After successful move, flip global turn
+      this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
     }
 
     // Schedule next tick
     this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
   }
 
-  /** Select a timeline to play on (where it's this color's turn) */
-  private _cpuSelectTimeline(): number {
-    // Get current turn color from main timeline
-    const mainTl = this.timelines[0];
-    if (!mainTl) return -1;
-
-    // Find all timelines where it's this color's turn
-    const color = mainTl.chess.turn();
+  /** Get all timelines where current color can play */
+  private _cpuGetPlayableTimelines(): number[] {
     const playable: number[] = [];
 
     for (const key in this.timelines) {
       const tl = this.timelines[parseInt(key)];
-      if (tl.chess.turn() === color && !tl.chess.in_checkmate() && !tl.chess.in_stalemate()) {
+      // Timeline is playable if it's this color's turn AND not in checkmate/stalemate
+      if (tl.chess.turn() === this.cpuGlobalTurn &&
+          !tl.chess.in_checkmate() &&
+          !tl.chess.in_stalemate()) {
         playable.push(tl.id);
       }
     }
 
-    if (playable.length === 0) return -1;
-
-    // Prefer main timeline, otherwise random
-    if (playable.includes(0)) return 0;
-    return playable[Math.floor(Math.random() * playable.length)];
+    return playable;
   }
 
   /** Make a CPU move on the given timeline */
   private _cpuMakeMove(tlId: number): boolean {
     const tl = this.timelines[tlId];
     if (!tl) return false;
+
+    const isWhite = tl.chess.turn() === 'w';
+    const portalBias = isWhite ? this.cpuWhitePortalBias : this.cpuBlackPortalBias;
+    const capturePreference = isWhite ? this.cpuWhiteCapturePreference : this.cpuBlackCapturePreference;
 
     // Switch to this timeline and animate camera if follow mode enabled
     if (this.activeTimelineId !== tlId) {
@@ -1767,9 +1857,9 @@ timelines - list timelines`,
     // Check for time travel opportunity (if we have a queen and under timeline limit)
     if (Object.keys(this.timelines).length < this.maxTimelines) {
       const timeTravelMove = this._cpuCheckTimeTravel(tlId);
-      if (timeTravelMove && Math.random() < this.cpuPortalBias) {
+      if (timeTravelMove && Math.random() < portalBias) {
         // Execute time travel move!
-        console.log('[CPU] Time traveling!', timeTravelMove);
+        console.log('[CPU] Time traveling!', { color: isWhite ? 'white' : 'black', timeline: tlId });
         this._makeTimeTravelMove(
           tlId,
           timeTravelMove.sourceSquare,
@@ -1781,12 +1871,11 @@ timelines - list timelines`,
       }
     }
 
-    // Otherwise, pick a random legal move (with slight preference for captures)
+    // Otherwise, pick a random legal move (with preference for captures based on setting)
     const captures = moves.filter(m => m.captured);
     let move: ChessMove;
 
-    if (captures.length > 0 && Math.random() < 0.7) {
-      // 70% chance to capture if available
+    if (captures.length > 0 && Math.random() < capturePreference) {
       move = captures[Math.floor(Math.random() * captures.length)];
     } else {
       move = moves[Math.floor(Math.random() * moves.length)];
@@ -1841,6 +1930,18 @@ timelines - list timelines`,
     if (cameraBtn) {
       cameraBtn.textContent = this.cpuCameraFollow ? 'Camera Follow: ON' : 'Camera Follow: OFF';
       cameraBtn.classList.toggle('active', this.cpuCameraFollow);
+    }
+
+    const whiteToggle = document.getElementById('cpu-white-toggle');
+    if (whiteToggle) {
+      whiteToggle.textContent = this.cpuWhiteEnabled ? 'ON' : 'OFF';
+      whiteToggle.classList.toggle('active', this.cpuWhiteEnabled);
+    }
+
+    const blackToggle = document.getElementById('cpu-black-toggle');
+    if (blackToggle) {
+      blackToggle.textContent = this.cpuBlackEnabled ? 'ON' : 'OFF';
+      blackToggle.classList.toggle('active', this.cpuBlackEnabled);
     }
   }
 }

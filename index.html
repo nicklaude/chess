@@ -22,8 +22,25 @@
             </div>
             <div id="cpu-controls">
                 <label>Speed: <input type="range" id="cpu-speed" min="100" max="2000" value="400" step="100"></label>
-                <label>Portal: <input type="range" id="cpu-portal" min="0" max="100" value="30" step="5"></label>
                 <button id="cpu-camera-toggle" class="active">Camera Follow: ON</button>
+                <div id="cpu-white-controls" class="cpu-color-controls">
+                    <div class="cpu-color-header">
+                        <span class="cpu-color-dot white"></span>
+                        <span>White CPU</span>
+                        <button id="cpu-white-toggle" class="cpu-color-toggle active">ON</button>
+                    </div>
+                    <label>Portal: <input type="range" id="cpu-white-portal" min="0" max="100" value="30" step="5"></label>
+                    <label>Capture: <input type="range" id="cpu-white-capture" min="0" max="100" value="70" step="5"></label>
+                </div>
+                <div id="cpu-black-controls" class="cpu-color-controls">
+                    <div class="cpu-color-header">
+                        <span class="cpu-color-dot black"></span>
+                        <span>Black CPU</span>
+                        <button id="cpu-black-toggle" class="cpu-color-toggle active">ON</button>
+                    </div>
+                    <label>Portal: <input type="range" id="cpu-black-portal" min="0" max="100" value="30" step="5"></label>
+                    <label>Capture: <input type="range" id="cpu-black-capture" min="0" max="100" value="70" step="5"></label>
+                </div>
             </div>
             <div id="command-panel">
                 <input type="text" id="command-input" placeholder="e2e4 or fen or help">
@@ -47,6 +64,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <!-- TypeScript compiled bundle (with cache buster) -->
-    <script src="dist/bundle.js?v=20260217e"></script>
+    <script src="dist/bundle.js?v=20260217f"></script>
 </body>
 </html>
