@@ -37,6 +37,10 @@ class GameManager {
   // Time travel movement state (queen moving backward in time)
   private timeTravelSelection: TimeTravelSelection | null = null;
 
+  // Cached state for optimized re-renders (avoid unnecessary DOM updates)
+  private _lastMoveListHtml = '';
+  private _lastTimelineListHtml = '';
+
   init(): void {
     Board3D.init('scene-container', (info) => this.handleClick(info));
 
@@ -127,22 +131,9 @@ class GameManager {
     const header = document.getElementById('shortcuts-header');
     if (panel && header && !header.hasAttribute('data-collapse-init')) {
       header.setAttribute('data-collapse-init', 'true');
-      // Start collapsed by default
-      panel.classList.add('collapsed');
-      header.style.cursor = 'pointer';
       header.addEventListener('click', () => {
         panel.classList.toggle('collapsed');
       });
-
-      // Add CSS for collapsed state if not present
-      if (!document.getElementById('collapsible-shortcuts-style')) {
-        const style = document.createElement('style');
-        style.id = 'collapsible-shortcuts-style';
-        style.textContent = `
-          #shortcuts-panel.collapsed .shortcut-row { display: none; }
-        `;
-        document.head.appendChild(style);
-      }
     }
   }
 
@@ -1706,7 +1697,10 @@ timelines - list timelines`,
     if (!movesEl) return;
     const tl = this.timelines[this.activeTimelineId];
     if (!tl) {
-      movesEl.innerHTML = '';
+      if (this._lastMoveListHtml !== '') {
+        movesEl.innerHTML = '';
+        this._lastMoveListHtml = '';
+      }
       return;
     }
     // Use moveHistory instead of chess.history() because chess.load() wipes history
@@ -1723,8 +1717,12 @@ timelines - list timelines`,
         '<span class="move">' + white + '</span>' +
         '<span class="move">' + black + '</span></div>';
     }
-    movesEl.innerHTML = html;
-    movesEl.scrollTop = movesEl.scrollHeight;
+    // Only update DOM if content changed (avoids unnecessary re-renders)
+    if (html !== this._lastMoveListHtml) {
+      movesEl.innerHTML = html;
+      movesEl.scrollTop = movesEl.scrollHeight;
+      this._lastMoveListHtml = html;
+    }
   }
 
   updateTimelineList(): void {
@@ -1809,27 +1807,31 @@ timelines - list timelines`,
         '</span></div>';
     }
 
-    listEl.innerHTML = html;
+    // Only update DOM if content changed (avoids unnecessary re-renders)
+    if (html !== this._lastTimelineListHtml) {
+      listEl.innerHTML = html;
+      this._lastTimelineListHtml = html;
 
-    // Attach click and hover handlers
-    const items = listEl.querySelectorAll('.tl-item');
-    items.forEach((item) => {
-      const tlId = parseInt((item as HTMLElement).dataset.tlId || '0');
+      // Attach click and hover handlers
+      const items = listEl.querySelectorAll('.tl-item');
+      items.forEach((item) => {
+        const tlId = parseInt((item as HTMLElement).dataset.tlId || '0');
 
-      // Click to select timeline
-      item.addEventListener('click', () => {
-        this.setActiveTimeline(tlId);
+        // Click to select timeline
+        item.addEventListener('click', () => {
+          this.setActiveTimeline(tlId);
+        });
+
+        // Hover to highlight connected timelines
+        item.addEventListener('mouseenter', () => {
+          this._highlightConnectedTimelines(tlId, true);
+        });
+
+        item.addEventListener('mouseleave', () => {
+          this._highlightConnectedTimelines(tlId, false);
+        });
       });
-
-      // Hover to highlight connected timelines
-      item.addEventListener('mouseenter', () => {
-        this._highlightConnectedTimelines(tlId, true);
-      });
-
-      item.addEventListener('mouseleave', () => {
-        this._highlightConnectedTimelines(tlId, false);
-      });
-    });
+    }
   }
 
   /* -- Branch Point Indicators -- */

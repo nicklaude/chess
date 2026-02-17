@@ -64,16 +64,21 @@
                 <input type="text" id="command-input" placeholder="e2e4 or fen or help">
                 <div id="command-output"></div>
             </div>
-            <div id="shortcuts-panel">
-                <div id="shortcuts-header">Keyboard Shortcuts</div>
-                <div class="shortcut-row"><span class="key">W A S D</span> Pan camera</div>
-                <div class="shortcut-row"><span class="key">Q / E</span> Rotate left/right</div>
-                <div class="shortcut-row"><span class="key">Space</span> Flip board</div>
-                <div class="shortcut-row"><span class="key">F</span> Focus timeline</div>
-                <div class="shortcut-row"><span class="key">C</span> Reset camera</div>
-                <div class="shortcut-row"><span class="key">Tab</span> Cycle timelines</div>
-                <div class="shortcut-row"><span class="key">Arrows</span> Navigate moves</div>
-                <div class="shortcut-row"><span class="key">Home / End</span> First/last move</div>
+            <div id="shortcuts-panel" class="collapsed">
+                <div id="shortcuts-header">
+                    <span class="shortcuts-toggle"></span>
+                    Keyboard Shortcuts
+                </div>
+                <div id="shortcuts-content">
+                    <div class="shortcut-row"><span class="key">W A S D</span> Pan camera</div>
+                    <div class="shortcut-row"><span class="key">Q / E</span> Rotate left/right</div>
+                    <div class="shortcut-row"><span class="key">Space</span> Flip board</div>
+                    <div class="shortcut-row"><span class="key">F</span> Focus timeline</div>
+                    <div class="shortcut-row"><span class="key">C</span> Reset camera</div>
+                    <div class="shortcut-row"><span class="key">Tab</span> Cycle timelines</div>
+                    <div class="shortcut-row"><span class="key">Arrows</span> Navigate moves</div>
+                    <div class="shortcut-row"><span class="key">Home / End</span> First/last move</div>
+                </div>
             </div>
             <div id="sidebar-footer">
                 <span id="fps-counter">-- FPS</span>

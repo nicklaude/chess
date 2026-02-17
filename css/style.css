@@ -414,7 +414,44 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #666688;
-    margin-bottom: 0.4rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    user-select: none;
+    transition: color 0.15s;
+}
+
+#shortcuts-header:hover {
+    color: #8888aa;
+}
+
+.shortcuts-toggle {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 5px solid #666688;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform 0.2s ease;
+}
+
+#shortcuts-panel:not(.collapsed) .shortcuts-toggle {
+    transform: rotate(90deg);
+}
+
+#shortcuts-content {
+    overflow: hidden;
+    max-height: 200px;
+    transition: max-height 0.25s ease, margin-top 0.25s ease, opacity 0.2s ease;
+    margin-top: 0.4rem;
+    opacity: 1;
+}
+
+#shortcuts-panel.collapsed #shortcuts-content {
+    max-height: 0;
+    margin-top: 0;
+    opacity: 0;
 }
 
 .shortcut-row {
