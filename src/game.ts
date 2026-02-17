@@ -1001,19 +1001,36 @@ timelines - list timelines`,
     const side = existingCount % 2 === 0 ? 1 : -1;
     const xOffset = sourceTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil(existingCount / 2);
 
-    // Modify the FEN to place the queen on the target square (possibly capturing)
-    const modifiedFen = this._modifyFen(fen, sourceSquare, piece, !isWhite);
-
     console.log('[Time Travel] Creating new timeline:', {
       originalFen: fen,
-      modifiedFen,
       sourceSquare,
       piece,
       snapshotIdx,
     });
 
-    // Create the new timeline with the queen already there
-    const newTl = this._createTimeline(newId, xOffset, sourceTimelineId, snapshotIdx, modifiedFen);
+    // Create the new timeline with the ORIGINAL historical FEN
+    // (We'll add the time-traveled piece manually to allow extra queens)
+    const newTl = this._createTimeline(newId, xOffset, sourceTimelineId, snapshotIdx, fen);
+
+    // Now manually place the time-traveled queen using chess.put()
+    // This bypasses validation that would reject multiple queens
+    const targetSquare = sourceSquare;  // Queen appears at same square, different time
+
+    // Remove any piece currently on target (capture)
+    const existingPiece = newTl.chess.get(targetSquare);
+    if (existingPiece) {
+      newTl.chess.remove(targetSquare);
+    }
+
+    // Place the time-traveled queen
+    const placed = newTl.chess.put(piece, targetSquare);
+    if (!placed) {
+      console.error('[Time Travel] Failed to place queen at', targetSquare);
+    }
+
+    // Note: We don't flip the turn here because chess.load() would reject
+    // the 2-queen FEN. The turn tracking is handled by our moveHistory,
+    // and the opponent will play next on this timeline.
 
     console.log('[Time Travel] New timeline chess state:', newTl.chess.fen());
     console.log('[Time Travel] New timeline board:', newTl.chess.board());
