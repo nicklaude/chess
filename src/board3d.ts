@@ -996,7 +996,11 @@ class Board3DManager implements IBoard3D {
 
     // Line goes: source board (top) -> down through time -> across to new timeline
     const sourceY = 0.3;  // Current board height
-    const targetY = -(targetTurnIndex + 1) * TimelineCol.LAYER_GAP + 0.2;  // Historical layer height
+    // Note: targetTurnIndex was computed BEFORE the departure snapshot was added to source.
+    // After addSnapshot(), history layers shift down: layer at index i moves to index i+1.
+    // So we add 1 to get the correct adjusted layer position.
+    const adjustedTurnIndex = targetTurnIndex + 1;
+    const targetY = -(adjustedTurnIndex + 1) * TimelineCol.LAYER_GAP + 0.2;  // Historical layer height
 
     // Start point: queen's position on current source board
     const start = new THREE.Vector3(sourceCol.xOffset + sqX, sourceY, sqZ);
