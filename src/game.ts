@@ -916,6 +916,9 @@ timelines - list timelines`,
       // Can't move if own piece is there
       if (targetPiece && targetPiece.color === sourceColor) continue;
 
+      // CANNOT capture kings - that would break the game
+      if (targetPiece && targetPiece.type === 'k') continue;
+
       // Valid target!
       targets.push({
         targetTimelineId: tlId,
@@ -1044,7 +1047,8 @@ timelines - list timelines`,
       const targetPiece = board[pos.r][pos.c];
 
       // Can arrive if square is empty or has enemy piece (capture)
-      if (!targetPiece || targetPiece.color !== piece.color) {
+      // CANNOT capture kings - that would break the game
+      if (!targetPiece || (targetPiece.color !== piece.color && targetPiece.type !== 'k')) {
         // turnIndex is relative to history layers (0 = most recent history)
         // Snapshot index 0 is initial state, snapshot length-1 is current
         // History layer 0 = snapshot at (length - 2), layer 1 = snapshot at (length - 3), etc.
@@ -1114,18 +1118,19 @@ timelines - list timelines`,
     // Clone board before we modify source timeline
     const sourceBoardBefore = this._cloneBoard(sourceTl.chess);
 
-    // 1. Remove queen from source timeline (it traveled away)
+    // 1. Remove piece from source timeline (it traveled away)
     const sourceFen = sourceTl.chess.fen();
     const newSourceFen = this._modifyFen(sourceFen, sourceSquare, null, !isWhite);
     sourceTl.chess.load(newSourceFen);
 
     // Record the departure move on source timeline
+    const pieceChar = piece.type.toUpperCase();
     sourceTl.moveHistory.push({
       from: sourceSquare,
       to: sourceSquare,
-      piece: 'q',
+      piece: piece.type,
       captured: null,
-      san: `Q${sourceSquare}⟳T${targetTurnIndex}`,  // Time travel notation
+      san: `${pieceChar}${sourceSquare}⟳T${targetTurnIndex}`,  // Time travel notation
       isWhite,
     });
     sourceTl.snapshots.push(this._cloneBoard(sourceTl.chess));
@@ -1159,9 +1164,9 @@ timelines - list timelines`,
     // (We'll add the time-traveled piece manually to allow extra queens)
     const newTl = this._createTimeline(newId, xOffset, sourceTimelineId, snapshotIdx, fen);
 
-    // Now manually place the time-traveled queen using chess.put()
-    // This bypasses validation that would reject multiple queens
-    const targetSquare = sourceSquare;  // Queen appears at same square, different time
+    // Now manually place the time-traveled piece using chess.put()
+    // This bypasses validation that would reject multiple queens etc
+    const targetSquare = sourceSquare;  // Piece appears at same square, different time
 
     // Remove any piece currently on target (capture)
     const existingPiece = newTl.chess.get(targetSquare);
@@ -1169,10 +1174,10 @@ timelines - list timelines`,
       newTl.chess.remove(targetSquare);
     }
 
-    // Place the time-traveled queen
+    // Place the time-traveled piece
     const placed = newTl.chess.put(piece, targetSquare);
     if (!placed) {
-      console.error('[Time Travel] Failed to place queen at', targetSquare);
+      console.error('[Time Travel] Failed to place piece at', targetSquare, piece);
     }
 
     // Note: We don't flip the turn here because chess.load() would reject
@@ -1203,9 +1208,9 @@ timelines - list timelines`,
     newTl.moveHistory.push({
       from: sourceSquare,
       to: sourceSquare,
-      piece: 'q',
+      piece: piece.type,
       captured: capturedPiece?.type || null,
-      san: `Q${sourceSquare}⟳←T${sourceTimelineId}`,  // Arrived via time travel
+      san: `${pieceChar}${sourceSquare}⟳←T${sourceTimelineId}`,  // Arrived via time travel
       isWhite,
     });
 
