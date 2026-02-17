@@ -1927,7 +1927,7 @@ timelines - list timelines`,
   private cpuEnabled = false;
   private cpuTimer: number | null = null;
   private cpuMoveDelay = 400;  // ms between moves (faster for visual effect)
-  private maxTimelines = 10;   // Limit timeline creation
+  private maxTimelines = 100;   // Allow many timelines (was 10)
   private cpuCameraFollow = true;  // Auto-follow moves with camera
   private cpuGlobalTurn: PieceColor = 'w';  // Track whose turn globally (independent of per-timeline state)
 
@@ -1944,6 +1944,13 @@ timelines - list timelines`,
   /** Start CPU auto-play mode */
   cpuStart(): void {
     if (this.cpuEnabled) return;
+
+    // Check if game is already over (all timelines in checkmate/stalemate)
+    if (this._cpuIsGameOver()) {
+      console.log('[CPU] Cannot start - all timelines already in checkmate/stalemate');
+      return;
+    }
+
     this.cpuEnabled = true;
     this._cpuTick();
     this._updateCpuUI();
@@ -2005,6 +2012,14 @@ timelines - list timelines`,
   private _cpuTick(): void {
     if (!this.cpuEnabled) return;
 
+    // Check if ALL timelines are finished (checkmate or stalemate)
+    // If so, stop CPU to avoid spinning forever
+    if (this._cpuIsGameOver()) {
+      console.log('[CPU] All timelines finished - stopping CPU');
+      this.cpuStop();
+      return;
+    }
+
     // Check if this color's CPU is enabled
     const isWhiteTurn = this.cpuGlobalTurn === 'w';
     const cpuActiveForColor = isWhiteTurn ? this.cpuWhiteEnabled : this.cpuBlackEnabled;
@@ -2020,7 +2035,7 @@ timelines - list timelines`,
     const playableTimelines = this._cpuGetPlayableTimelines();
 
     if (playableTimelines.length === 0) {
-      // No playable timelines - flip turn and keep ticking
+      // No playable timelines for this color - flip turn and keep ticking
       this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
       this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
       return;
@@ -2037,6 +2052,19 @@ timelines - list timelines`,
 
     // Schedule next tick
     this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
+  }
+
+  /** Check if game is completely over - all timelines in checkmate or stalemate */
+  private _cpuIsGameOver(): boolean {
+    for (const key in this.timelines) {
+      const tl = this.timelines[parseInt(key)];
+      // If any timeline is NOT in checkmate/stalemate, game is not over
+      if (!tl.chess.in_checkmate() && !tl.chess.in_stalemate()) {
+        return false;
+      }
+    }
+    // All timelines finished
+    return true;
   }
 
   /** Get all timelines where current color can play */
@@ -2061,6 +2089,12 @@ timelines - list timelines`,
     const tl = this.timelines[tlId];
     if (!tl) return false;
 
+    // Double-check: refuse to move if in checkmate or stalemate
+    if (tl.chess.in_checkmate() || tl.chess.in_stalemate()) {
+      console.log('[CPU] Skipping timeline', tlId, '- already in checkmate/stalemate');
+      return false;
+    }
+
     const isWhite = tl.chess.turn() === 'w';
     const capturePreference = isWhite ? this.cpuWhiteCapturePreference : this.cpuBlackCapturePreference;
 
@@ -2071,7 +2105,10 @@ timelines - list timelines`,
 
     // Get legal moves
     const moves = tl.chess.moves({ verbose: true }) as ChessMove[];
-    if (moves.length === 0) return false;
+    if (moves.length === 0) {
+      console.log('[CPU] No legal moves on timeline', tlId);
+      return false;
+    }
 
     // Check for time travel opportunity (if under timeline limit)
     // _cpuCheckTimeTravel already handles per-piece bias checks internally
