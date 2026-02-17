@@ -419,3 +419,53 @@ body {
         font-size: 0.75rem;
     }
 }
+
+/* Command panel for programmatic testing */
+#command-panel {
+    background: rgba(35, 35, 65, 0.4);
+    border-radius: 10px;
+    padding: 0.75rem;
+    border: 1px solid rgba(80, 80, 160, 0.15);
+}
+
+#command-input {
+    width: 100%;
+    padding: 0.5rem;
+    background: rgba(20, 20, 40, 0.8);
+    border: 1px solid rgba(80, 80, 160, 0.3);
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    outline: none;
+}
+
+#command-input:focus {
+    border-color: rgba(100, 136, 204, 0.6);
+}
+
+#command-input::placeholder {
+    color: #666699;
+}
+
+#command-output {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(10, 10, 25, 0.6);
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.75rem;
+    color: #88aa88;
+    max-height: 100px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    display: none;
+}
+
+#command-output.visible {
+    display: block;
+}
+
+#command-output.error {
+    color: #ff6666;
+}

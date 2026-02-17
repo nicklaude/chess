@@ -51,6 +51,9 @@ class GameManager {
     // Setup move slider
     this._setupMoveSlider();
 
+    // Setup command input for programmatic testing
+    this._setupCommandInput();
+
     // Create the main timeline
     this._createTimeline(0, 0, null, -1, null);
     this.setActiveTimeline(0);
@@ -129,6 +132,125 @@ class GameManager {
         this.goToMove(parseInt(slider.value));
       });
     }
+  }
+
+  /* -- Command Input for Programmatic Testing -- */
+  private _setupCommandInput(): void {
+    const input = document.getElementById('command-input') as HTMLInputElement | null;
+    const output = document.getElementById('command-output');
+    if (!input || !output) return;
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = input.value.trim().toLowerCase();
+        const result = this._executeCommand(cmd);
+        output.textContent = result.message;
+        output.classList.add('visible');
+        output.classList.toggle('error', !result.success);
+        if (result.success) {
+          input.value = '';
+        }
+      }
+    });
+  }
+
+  private _executeCommand(cmd: string): { success: boolean; message: string } {
+    const tl = this.timelines[this.activeTimelineId];
+    if (!tl) return { success: false, message: 'No active timeline' };
+
+    // help command
+    if (cmd === 'help') {
+      return {
+        success: true,
+        message: `Commands:
+e2e4 - make move (from-to)
+fen - show current FEN
+select e2 - select square
+timetravel N - travel to turn N
+switch N - switch to timeline N
+reset - new game
+timelines - list timelines`,
+      };
+    }
+
+    // fen command
+    if (cmd === 'fen') {
+      return { success: true, message: tl.chess.fen() };
+    }
+
+    // reset command
+    if (cmd === 'reset') {
+      this.reset();
+      return { success: true, message: 'Game reset' };
+    }
+
+    // timelines command
+    if (cmd === 'timelines') {
+      const tlList = Object.keys(this.timelines).map(id => {
+        const t = this.timelines[parseInt(id)];
+        return `${id}: ${t.name} (${t.moveHistory.length} moves)`;
+      }).join('\n');
+      return { success: true, message: tlList };
+    }
+
+    // switch N command
+    const switchMatch = cmd.match(/^switch\s+(\d+)$/);
+    if (switchMatch) {
+      const tlId = parseInt(switchMatch[1]);
+      if (this.timelines[tlId]) {
+        this.setActiveTimeline(tlId);
+        return { success: true, message: `Switched to timeline ${tlId}` };
+      }
+      return { success: false, message: `Timeline ${tlId} not found` };
+    }
+
+    // select SQ command
+    const selectMatch = cmd.match(/^select\s+([a-h][1-8])$/);
+    if (selectMatch) {
+      const sq = selectMatch[1];
+      this._handleBoardClick(this.activeTimelineId, sq);
+      return { success: true, message: `Selected ${sq}` };
+    }
+
+    // timetravel N command
+    const ttMatch = cmd.match(/^timetravel\s+(\d+)$/);
+    if (ttMatch) {
+      const turnIdx = parseInt(ttMatch[1]);
+      if (!this.timeTravelSelection) {
+        return { success: false, message: 'Select a queen first with time travel targets' };
+      }
+      const target = this.timeTravelSelection.validTargets.find(t => t.targetTurnIndex === turnIdx);
+      if (!target) {
+        return { success: false, message: `No time travel target at turn ${turnIdx}` };
+      }
+      this.makeTimeTravelMove(
+        this.timeTravelSelection.sourceTimelineId,
+        this.timeTravelSelection.sourceSquare,
+        target.targetTurnIndex,
+        this.timeTravelSelection.piece,
+        target.isCapture ? target.capturedPiece : null
+      );
+      return { success: true, message: `Time traveled to turn ${turnIdx}` };
+    }
+
+    // move command (e2e4 format)
+    const moveMatch = cmd.match(/^([a-h][1-8])([a-h][1-8])([qrbn])?$/);
+    if (moveMatch) {
+      const from = moveMatch[1];
+      const to = moveMatch[2];
+      const promotion = moveMatch[3] as PieceType | undefined;
+
+      const moves = tl.chess.moves({ verbose: true }) as ChessMove[];
+      const move = moves.find(m => m.from === from && m.to === to);
+      if (!move) {
+        return { success: false, message: `Invalid move: ${from}-${to}` };
+      }
+      this.makeMove(this.activeTimelineId, move, promotion);
+      return { success: true, message: `Moved ${from}-${to}` };
+    }
+
+    return { success: false, message: `Unknown command: ${cmd}. Type 'help' for commands.` };
   }
 
   private _updateMoveSlider(): void {
@@ -269,7 +391,13 @@ class GameManager {
   ): TimelineData {
     let chess: ChessInstance;
     if (initialFen) {
-      chess = new Chess(initialFen);
+      chess = new Chess();
+      const loaded = chess.load(initialFen);
+      if (!loaded) {
+        console.error('[_createTimeline] Failed to load FEN:', initialFen);
+        // Fallback to starting position
+        chess = new Chess();
+      }
     } else {
       chess = new Chess();
     }
@@ -813,16 +941,30 @@ class GameManager {
 
     // Get FEN at target historical point
     let fen = this._getSnapshotFen(targetSnapshot);
+    console.log('[Time Travel] snapshotIdx:', snapshotIdx);
+    console.log('[Time Travel] targetSnapshot:', JSON.stringify(targetSnapshot).slice(0, 200));
+    console.log('[Time Travel] FEN from snapshot:', fen);
+
     if (!fen) {
+      console.log('[Time Travel] No FEN in snapshot, rebuilding from moves...');
       // Fallback: Rebuild FEN by replaying moves (for old snapshots)
       const forkChess = new Chess();
       for (let i = 0; i < snapshotIdx; i++) {
         if (i < sourceTl.moveHistory.length) {
           const histMove = sourceTl.moveHistory[i];
-          forkChess.move({ from: histMove.from, to: histMove.to, promotion: histMove.promotion || undefined });
+          const moveResult = forkChess.move({ from: histMove.from, to: histMove.to, promotion: histMove.promotion || undefined });
+          if (!moveResult) {
+            console.error('[Time Travel] Failed to replay move:', histMove);
+          }
         }
       }
       fen = forkChess.fen();
+      console.log('[Time Travel] Rebuilt FEN:', fen);
+    }
+
+    if (!fen) {
+      console.error('[Time Travel] Could not get FEN! Aborting time travel.');
+      return;
     }
 
     // Clone board before we modify source timeline
@@ -859,11 +1001,39 @@ class GameManager {
     const side = existingCount % 2 === 0 ? 1 : -1;
     const xOffset = sourceTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil(existingCount / 2);
 
-    // Modify the FEN to place the queen on the target square (possibly capturing)
-    const modifiedFen = this._modifyFen(fen, sourceSquare, piece, !isWhite);
+    console.log('[Time Travel] Creating new timeline:', {
+      originalFen: fen,
+      sourceSquare,
+      piece,
+      snapshotIdx,
+    });
 
-    // Create the new timeline with the queen already there
-    const newTl = this._createTimeline(newId, xOffset, sourceTimelineId, snapshotIdx, modifiedFen);
+    // Create the new timeline with the ORIGINAL historical FEN
+    // (We'll add the time-traveled piece manually to allow extra queens)
+    const newTl = this._createTimeline(newId, xOffset, sourceTimelineId, snapshotIdx, fen);
+
+    // Now manually place the time-traveled queen using chess.put()
+    // This bypasses validation that would reject multiple queens
+    const targetSquare = sourceSquare;  // Queen appears at same square, different time
+
+    // Remove any piece currently on target (capture)
+    const existingPiece = newTl.chess.get(targetSquare);
+    if (existingPiece) {
+      newTl.chess.remove(targetSquare);
+    }
+
+    // Place the time-traveled queen
+    const placed = newTl.chess.put(piece, targetSquare);
+    if (!placed) {
+      console.error('[Time Travel] Failed to place queen at', targetSquare);
+    }
+
+    // Note: We don't flip the turn here because chess.load() would reject
+    // the 2-queen FEN. The turn tracking is handled by our moveHistory,
+    // and the opponent will play next on this timeline.
+
+    console.log('[Time Travel] New timeline chess state:', newTl.chess.fen());
+    console.log('[Time Travel] New timeline board:', newTl.chess.board());
 
     // Copy snapshots up to the branch point
     newTl.snapshots = [];
@@ -959,7 +1129,13 @@ class GameManager {
     };
 
     // Modify the specific square
+    console.log('[_modifyFen] pos:', pos, 'rows:', rows, 'rows[pos.r]:', rows[pos.r]);
+    if (!rows[pos.r]) {
+      console.error('[_modifyFen] Invalid row index:', pos.r, 'FEN rows:', rows);
+      return fen;  // Return unchanged if invalid
+    }
     const rowArr = expandRow(rows[pos.r]);
+    console.log('[_modifyFen] expanded row:', rowArr);
     if (newPiece) {
       const pieceChar = newPiece.color === 'w'
         ? newPiece.type.toUpperCase()
@@ -974,7 +1150,26 @@ class GameManager {
     parts[0] = rows.join('/');
     parts[1] = whiteToMove ? 'w' : 'b';
 
-    return parts.join(' ');
+    const result = parts.join(' ');
+
+    // Validate the result by trying to parse it
+    const testChess = new Chess();
+    const valid = testChess.load(result);
+    if (!valid) {
+      console.error('[_modifyFen] Generated invalid FEN!', {
+        input: fen,
+        output: result,
+        square,
+        newPiece,
+        pos,
+        rowArr,
+      });
+      // Return original FEN if we broke it
+      return fen;
+    }
+
+    console.log('[_modifyFen] Result:', { input: fen, output: result, square, newPiece, valid });
+    return result;
   }
 
   /* -- Promotion UI -- */

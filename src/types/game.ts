@@ -158,6 +158,8 @@ export interface ChessInstance {
   board(): Board;
   turn(): PieceColor;
   get(square: string): Piece | null;
+  put(piece: Piece, square: string): boolean;
+  remove(square: string): Piece | null;
   move(move: string | { from: string; to: string; promotion?: PieceType }): ChessMove | null;
   moves(options?: { square?: string; verbose?: boolean }): ChessMove[] | string[];
   history(options?: { verbose?: boolean }): string[] | ChessMove[];
