@@ -620,13 +620,30 @@ timelines - list timelines`,
       chess = new Chess();
       const loaded = chess.load(initialFen);
       if (!loaded) {
-        console.error('[_createTimeline] Failed to load FEN:', initialFen);
+        console.error('[_createTimeline] MISSING_BOARD_BUG: Failed to load FEN:', initialFen, {
+          timelineId: id,
+          parentId,
+          branchTurn,
+        });
         // Fallback to starting position
         chess = new Chess();
       }
     } else {
       chess = new Chess();
     }
+
+    // Validate we have a valid board
+    const board = chess.board();
+    let pieceCount = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (board[r] && board[r][c]) pieceCount++;
+      }
+    }
+    console.log('[_createTimeline] Created timeline', id, 'with', pieceCount, 'pieces', {
+      fen: chess.fen(),
+      xOffset,
+    });
 
     const tlData: TimelineData = {
       id,
@@ -1347,7 +1364,11 @@ timelines - list timelines`,
     const fixedFen = fenParts.join(' ');
     const loadResult = newTl.chess.load(fixedFen);
     if (!loadResult) {
-      console.error('[Time Travel] Failed to load turn-fixed FEN:', fixedFen);
+      console.error('[Time Travel] MISSING_BOARD_BUG: Failed to load turn-fixed FEN:', fixedFen, {
+        originalFen: fen,
+        currentFen,
+        newTimelineId: newId,
+      });
     }
 
     console.log('[Time Travel] New timeline chess state:', newTl.chess.fen());
@@ -1611,11 +1632,33 @@ timelines - list timelines`,
   /* -- Rendering -- */
   renderTimeline(tlId: number): void {
     const tl = this.timelines[tlId];
-    if (!tl) return;
+    if (!tl) {
+      console.error('[renderTimeline] MISSING_BOARD_BUG: Timeline data not found for id:', tlId);
+      return;
+    }
     const col = Board3D.getTimeline(tlId);
-    if (!col) return;
+    if (!col) {
+      console.error('[renderTimeline] MISSING_BOARD_BUG: 3D timeline not found for id:', tlId);
+      return;
+    }
 
-    col.render(tl.chess.board());
+    const board = tl.chess.board();
+    // Count pieces on the board
+    let pieceCount = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (board[r] && board[r][c]) pieceCount++;
+      }
+    }
+    if (pieceCount === 0) {
+      console.error('[renderTimeline] MISSING_BOARD_BUG: Board has 0 pieces!', {
+        timelineId: tlId,
+        fen: tl.chess.fen(),
+        board,
+      });
+    }
+
+    col.render(board);
 
     // Update board glow based on game state
     if (tl.chess.in_checkmate()) {
