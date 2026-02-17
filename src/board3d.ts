@@ -4,7 +4,7 @@
 import type {
   Scene, PerspectiveCamera, WebGLRenderer, Raycaster, Vector2, Vector3, Clock,
   Group, Mesh, Sprite, Points, Material, MeshStandardMaterial, SpriteMaterial,
-  Texture, Object3D, BufferAttribute, Color, BoxGeometry, Curve
+  Texture, Object3D, BufferAttribute, Color, BoxGeometry, Curve, BufferGeometry
 } from 'three';
 
 import type {
@@ -40,6 +40,248 @@ declare const THREE: typeof import('three') & {
 };
 
 // ===============================================================
+// SharedResources - singleton for shared geometries and materials
+// Performance optimization: create once, reuse everywhere
+// ===============================================================
+
+class SharedResources {
+  private static _instance: SharedResources | null = null;
+
+  // Shared geometries (created once, reused everywhere)
+  squareGeometry: InstanceType<typeof THREE.PlaneGeometry> | null = null;
+  historySquareGeometry: InstanceType<typeof THREE.BoxGeometry> | null = null;
+  boardBaseGeometry: InstanceType<typeof THREE.BoxGeometry> | null = null;
+  boardTrimGeometry: InstanceType<typeof THREE.BoxGeometry> | null = null;
+  historyBaseGeometry: InstanceType<typeof THREE.BoxGeometry> | null = null;
+
+  // Move indicator geometries
+  moveIndicatorCircle: InstanceType<typeof THREE.CircleGeometry> | null = null;
+  moveIndicatorRing: InstanceType<typeof THREE.RingGeometry> | null = null;
+  lastMoveHighlightGeometry: InstanceType<typeof THREE.PlaneGeometry> | null = null;
+
+  // Cross-timeline indicator geometries
+  crossTimelineRingSmall: InstanceType<typeof THREE.RingGeometry> | null = null;
+  crossTimelineRingLarge: InstanceType<typeof THREE.RingGeometry> | null = null;
+  crossTimelineGlowGeometry: InstanceType<typeof THREE.CircleGeometry> | null = null;
+
+  // Time travel portal geometries
+  portalOuterRing: InstanceType<typeof THREE.TorusGeometry> | null = null;
+  portalInnerGlow: InstanceType<typeof THREE.CircleGeometry> | null = null;
+  portalCaptureRing: InstanceType<typeof THREE.TorusGeometry> | null = null;
+
+  // Shared materials (not cloned - for objects that don't need per-instance color changes)
+  boardBaseMat: MeshStandardMaterial | null = null;
+  boardTrimMat: MeshStandardMaterial | null = null;
+  historyBaseMat: MeshStandardMaterial | null = null;
+  moveIndicatorMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  lastMoveHighlightMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  crossTimelineRingMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  crossTimelineGlowMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  portalRingMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  portalGlowMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  portalGlowCaptureMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+  portalCaptureRingMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
+
+  static getInstance(): SharedResources {
+    if (!SharedResources._instance) {
+      SharedResources._instance = new SharedResources();
+      SharedResources._instance._init();
+    }
+    return SharedResources._instance;
+  }
+
+  private _init(): void {
+    // === Geometries ===
+    this.squareGeometry = new THREE.PlaneGeometry(0.96, 0.96);
+    this.historySquareGeometry = new THREE.BoxGeometry(0.93, 0.025, 0.93);
+    this.boardBaseGeometry = new THREE.BoxGeometry(8.6, 0.18, 8.6);
+    this.boardTrimGeometry = new THREE.BoxGeometry(8.8, 0.06, 8.8);
+    this.historyBaseGeometry = new THREE.BoxGeometry(8.2, 0.03, 8.2);
+
+    // Move indicators
+    this.moveIndicatorCircle = new THREE.CircleGeometry(0.14, 32);
+    this.moveIndicatorRing = new THREE.RingGeometry(0.34, 0.44, 32);
+    this.lastMoveHighlightGeometry = new THREE.PlaneGeometry(0.96, 0.96);
+
+    // Cross-timeline indicators
+    this.crossTimelineRingSmall = new THREE.RingGeometry(0.28, 0.38, 32);
+    this.crossTimelineRingLarge = new THREE.RingGeometry(0.38, 0.48, 32);
+    this.crossTimelineGlowGeometry = new THREE.CircleGeometry(0.5, 32);
+
+    // Time travel portals
+    this.portalOuterRing = new THREE.TorusGeometry(0.42, 0.06, 8, 32);
+    this.portalInnerGlow = new THREE.CircleGeometry(0.36, 32);
+    this.portalCaptureRing = new THREE.TorusGeometry(0.48, 0.04, 8, 32);
+
+    // === Shared Materials ===
+    this.boardBaseMat = new THREE.MeshStandardMaterial({
+      color: 0x15152a,
+      metalness: 0.7,
+      roughness: 0.3,
+    });
+    this.boardTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x333366,
+      metalness: 0.9,
+      roughness: 0.2,
+    });
+    this.historyBaseMat = new THREE.MeshStandardMaterial({
+      color: 0x15152a,
+      transparent: true,
+      opacity: 0.25,
+      metalness: 0.5,
+      roughness: 0.5,
+    });
+    this.moveIndicatorMat = new THREE.MeshBasicMaterial({
+      color: 0xffdd44,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.lastMoveHighlightMat = new THREE.MeshBasicMaterial({
+      color: 0x4488ff,
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.crossTimelineRingMat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.crossTimelineGlowMat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff,
+      transparent: true,
+      opacity: 0.2,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.portalRingMat = new THREE.MeshBasicMaterial({
+      color: 0x44ffaa,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    });
+    this.portalGlowMat = new THREE.MeshBasicMaterial({
+      color: 0x44ffaa,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.portalGlowCaptureMat = new THREE.MeshBasicMaterial({
+      color: 0x44ffaa,
+      transparent: true,
+      opacity: 0.4,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.portalCaptureRingMat = new THREE.MeshBasicMaterial({
+      color: 0xff6666,
+      transparent: true,
+      opacity: 0.6,
+      side: THREE.DoubleSide,
+    });
+  }
+
+  /** Dispose all shared resources (call on game shutdown) */
+  dispose(): void {
+    this.squareGeometry?.dispose();
+    this.historySquareGeometry?.dispose();
+    this.boardBaseGeometry?.dispose();
+    this.boardTrimGeometry?.dispose();
+    this.historyBaseGeometry?.dispose();
+    this.moveIndicatorCircle?.dispose();
+    this.moveIndicatorRing?.dispose();
+    this.lastMoveHighlightGeometry?.dispose();
+    this.crossTimelineRingSmall?.dispose();
+    this.crossTimelineRingLarge?.dispose();
+    this.crossTimelineGlowGeometry?.dispose();
+    this.portalOuterRing?.dispose();
+    this.portalInnerGlow?.dispose();
+    this.portalCaptureRing?.dispose();
+
+    this.boardBaseMat?.dispose();
+    this.boardTrimMat?.dispose();
+    this.historyBaseMat?.dispose();
+    this.moveIndicatorMat?.dispose();
+    this.lastMoveHighlightMat?.dispose();
+    this.crossTimelineRingMat?.dispose();
+    this.crossTimelineGlowMat?.dispose();
+    this.portalRingMat?.dispose();
+    this.portalGlowMat?.dispose();
+    this.portalGlowCaptureMat?.dispose();
+    this.portalCaptureRingMat?.dispose();
+
+    SharedResources._instance = null;
+  }
+}
+
+// ===============================================================
+// MeshPool - object pooling for frequently created/destroyed objects
+// Reduces GC pressure and allocation overhead for 100+ timelines
+// ===============================================================
+
+interface PooledMesh extends Mesh {
+  _poolType?: string;
+}
+
+class MeshPool {
+  private pools: Map<string, PooledMesh[]> = new Map();
+  private maxPoolSize = 200;  // Allow more pooled objects for 100+ timelines
+
+  /** Get a mesh from the pool or create a new one */
+  acquire(
+    type: string,
+    geometry: BufferGeometry,
+    material: Material
+  ): PooledMesh {
+    const pool = this.pools.get(type);
+    if (pool && pool.length > 0) {
+      const mesh = pool.pop()!;
+      mesh.visible = true;
+      return mesh;
+    }
+    const mesh = new THREE.Mesh(geometry, material) as PooledMesh;
+    mesh._poolType = type;
+    mesh.frustumCulled = true;  // Enable frustum culling for performance
+    return mesh;
+  }
+
+  /** Return a mesh to the pool */
+  release(mesh: PooledMesh): void {
+    const type = mesh._poolType;
+    if (!type) return;
+
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    }
+    mesh.visible = false;
+
+    let pool = this.pools.get(type);
+    if (!pool) {
+      pool = [];
+      this.pools.set(type, pool);
+    }
+    if (pool.length < this.maxPoolSize) {
+      pool.push(mesh);
+    }
+    // If pool is full, let it be garbage collected (don't dispose shared geometry/material)
+  }
+
+  /** Clear all pools */
+  clear(): void {
+    this.pools.clear();
+  }
+}
+
+// Global pool instance
+const meshPool = new MeshPool();
+
+// ===============================================================
 // TimelineCol - one per timeline
 // ===============================================================
 
@@ -48,6 +290,7 @@ export class TimelineCol implements ITimelineCol {
   static readonly MAX_LAYERS = 12;
 
   private scene: Scene;
+  private shared: SharedResources;
   id: number;
   xOffset: number;
   private tint: number;
@@ -78,6 +321,7 @@ export class TimelineCol implements ITimelineCol {
     pieceTex: (char: string, isWhite: boolean) => Texture
   ) {
     this.scene = scene;
+    this.shared = SharedResources.getInstance();
     this.id = id;
     this.xOffset = xOffset;
     this.tint = tintColor;
@@ -112,36 +356,41 @@ export class TimelineCol implements ITimelineCol {
 
   /* board base + squares */
   private _buildBoard(): void {
-    // Base board - lowered to prevent z-fighting with square bottoms when viewed from below
+    // Base board - using shared geometry and material
     const base = new THREE.Mesh(
-      new THREE.BoxGeometry(8.6, 0.18, 8.6),
-      new THREE.MeshStandardMaterial({ color: 0x15152a, metalness: 0.7, roughness: 0.3 })
+      this.shared.boardBaseGeometry!,
+      this.shared.boardBaseMat!
     );
-    base.position.y = -0.16;  // Lowered from -0.14 to create gap with square bottoms
+    base.position.y = -0.16;
     base.receiveShadow = true;
+    base.frustumCulled = true;
     this.group.add(base);
 
     const trim = new THREE.Mesh(
-      new THREE.BoxGeometry(8.8, 0.06, 8.8),
-      new THREE.MeshStandardMaterial({ color: 0x333366, metalness: 0.9, roughness: 0.2 })
+      this.shared.boardTrimGeometry!,
+      this.shared.boardTrimMat!
     );
-    trim.position.y = -0.28;  // Lowered from -0.24 to stay below base
+    trim.position.y = -0.28;
+    trim.frustumCulled = true;
     this.group.add(trim);
 
+    // Squares need per-instance materials for highlighting, but share geometry
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const isLight = (r + c) % 2 === 0;
+        // Clone material for per-square color changes (highlights)
         const mat = new THREE.MeshStandardMaterial({
           color: isLight ? 0x7575a8 : 0x44446e,
           metalness: 0.15,
           roughness: 0.75,
-          side: THREE.FrontSide,  // Only visible from above, not below
+          side: THREE.FrontSide,
         });
-        // Use PlaneGeometry for single-sided squares (invisible from below)
-        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.96), mat);
-        mesh.rotation.x = -Math.PI / 2;  // Rotate to lie flat
-        mesh.position.set(c - 3.5, 0.035, r - 3.5);  // Slight y offset to sit on base
+        // Use shared PlaneGeometry
+        const mesh = new THREE.Mesh(this.shared.squareGeometry!, mat);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(c - 3.5, 0.035, r - 3.5);
         mesh.receiveShadow = true;
+        mesh.frustumCulled = true;  // Enable frustum culling
         mesh.userData = {
           square: this._toSq(r, c),
           row: r,
@@ -198,6 +447,7 @@ export class TimelineCol implements ITimelineCol {
         );
         sprite.position.set(c - 3.5, 0.22, r - 3.5);
         sprite.scale.set(0.88, 0.88, 0.88);
+        sprite.frustumCulled = true;
         this.pieceMeshes.push(sprite);
         this.group.add(sprite);
       }
@@ -218,17 +468,12 @@ export class TimelineCol implements ITimelineCol {
     for (let i = 0; i < moves.length; i++) {
       const p = this._fromSq(moves[i].to);
       const hasPiece = position[p.r][p.c] !== null;
+      // Use shared geometry and material via object pool
       const geo = hasPiece
-        ? new THREE.RingGeometry(0.34, 0.44, 32)
-        : new THREE.CircleGeometry(0.14, 32);
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xffdd44,
-        transparent: true,
-        opacity: 0.5,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      const ind = new THREE.Mesh(geo, mat);
+        ? this.shared.moveIndicatorRing!
+        : this.shared.moveIndicatorCircle!;
+      const poolType = hasPiece ? 'moveIndicatorRing' : 'moveIndicatorCircle';
+      const ind = meshPool.acquire(poolType, geo, this.shared.moveIndicatorMat!);
       ind.rotation.x = -Math.PI / 2;
       ind.position.set(p.c - 3.5, 0.06, p.r - 3.5);
       this.group.add(ind);
@@ -237,22 +482,19 @@ export class TimelineCol implements ITimelineCol {
   }
 
   showLastMove(from: string, to: string): void {
+    // Return old highlights to pool
     for (let i = 0; i < this.lastMoveHL.length; i++) {
-      this.group.remove(this.lastMoveHL[i]);
+      meshPool.release(this.lastMoveHL[i] as PooledMesh);
     }
     this.lastMoveHL = [];
     const sqs = [from, to];
     for (let i = 0; i < 2; i++) {
       const pos = this._fromSq(sqs[i]);
-      const pl = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.96, 0.96),
-        new THREE.MeshBasicMaterial({
-          color: 0x4488ff,
-          transparent: true,
-          opacity: 0.15,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        })
+      // Use shared geometry and material via pool
+      const pl = meshPool.acquire(
+        'lastMoveHighlight',
+        this.shared.lastMoveHighlightGeometry!,
+        this.shared.lastMoveHighlightMat!
       );
       pl.rotation.x = -Math.PI / 2;
       pl.position.set(pos.c - 3.5, 0.055, pos.r - 3.5);
@@ -270,7 +512,8 @@ export class TimelineCol implements ITimelineCol {
         );
         (h.mesh.material as MeshStandardMaterial).emissive = new THREE.Color(0);
       } else {
-        this.group.remove(h.mesh);
+        // Return pooled meshes instead of disposing
+        meshPool.release(h.mesh as PooledMesh);
       }
     }
     this.highlightMeshes = [];
@@ -279,33 +522,23 @@ export class TimelineCol implements ITimelineCol {
   /* Cross-timeline movement indicators */
   showCrossTimelineTarget(sq: string, isCapture: boolean): void {
     const pos = this._fromSq(sq);
-    // Purple ring for cross-timeline targets (larger if capture)
+    // Use shared geometry and material via pool
     const geo = isCapture
-      ? new THREE.RingGeometry(0.38, 0.48, 32)
-      : new THREE.RingGeometry(0.28, 0.38, 32);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xaa44ff,  // Purple for cross-timeline
-      transparent: true,
-      opacity: 0.7,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const ind = new THREE.Mesh(geo, mat);
+      ? this.shared.crossTimelineRingLarge!
+      : this.shared.crossTimelineRingSmall!;
+    const poolType = isCapture ? 'crossTimelineRingLarge' : 'crossTimelineRingSmall';
+    const ind = meshPool.acquire(poolType, geo, this.shared.crossTimelineRingMat!);
     ind.rotation.x = -Math.PI / 2;
     ind.position.set(pos.c - 3.5, 0.08, pos.r - 3.5);
     this.group.add(ind);
     this.crossTimelineTargets.push(ind);
 
     // Add pulsing glow effect
-    const glowGeo = new THREE.CircleGeometry(0.5, 32);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xaa44ff,
-      transparent: true,
-      opacity: 0.2,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
+    const glow = meshPool.acquire(
+      'crossTimelineGlow',
+      this.shared.crossTimelineGlowGeometry!,
+      this.shared.crossTimelineGlowMat!
+    );
     glow.rotation.x = -Math.PI / 2;
     glow.position.set(pos.c - 3.5, 0.07, pos.r - 3.5);
     this.group.add(glow);
@@ -314,7 +547,7 @@ export class TimelineCol implements ITimelineCol {
 
   clearCrossTimelineTargets(): void {
     for (const mesh of this.crossTimelineTargets) {
-      this.group.remove(mesh);
+      meshPool.release(mesh as PooledMesh);
     }
     this.crossTimelineTargets = [];
   }
@@ -328,35 +561,21 @@ export class TimelineCol implements ITimelineCol {
     if (!layer) return;
 
     const pos = this._fromSq(sq);
-    const layerY = layer.position.y;
 
-    // Create a glowing portal/ring effect - cyan-green for time travel
-    const portalColor = 0x44ffaa;
-
-    // Outer glow ring
-    const outerRingGeo = new THREE.TorusGeometry(0.42, 0.06, 8, 32);
-    const outerRingMat = new THREE.MeshBasicMaterial({
-      color: portalColor,
-      transparent: true,
-      opacity: 0.8,
-      side: THREE.DoubleSide,
-    });
-    const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
+    // Outer glow ring - use shared geometry via pool
+    const outerRing = meshPool.acquire(
+      'portalOuterRing',
+      this.shared.portalOuterRing!,
+      this.shared.portalRingMat!
+    );
     outerRing.rotation.x = -Math.PI / 2;
     outerRing.position.set(pos.c - 3.5, 0.12, pos.r - 3.5);
     layer.add(outerRing);
     this.timeTravelTargets.push(outerRing);
 
     // Inner glow disc
-    const glowGeo = new THREE.CircleGeometry(0.36, 32);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: portalColor,
-      transparent: true,
-      opacity: isCapture ? 0.4 : 0.25,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
+    const glowMat = isCapture ? this.shared.portalGlowCaptureMat! : this.shared.portalGlowMat!;
+    const glow = meshPool.acquire('portalInnerGlow', this.shared.portalInnerGlow!, glowMat);
     glow.rotation.x = -Math.PI / 2;
     glow.position.set(pos.c - 3.5, 0.11, pos.r - 3.5);
     layer.add(glow);
@@ -364,14 +583,11 @@ export class TimelineCol implements ITimelineCol {
 
     // Capture indicator (red-ish outer ring if capturing)
     if (isCapture) {
-      const captureRingGeo = new THREE.TorusGeometry(0.48, 0.04, 8, 32);
-      const captureRingMat = new THREE.MeshBasicMaterial({
-        color: 0xff6666,
-        transparent: true,
-        opacity: 0.6,
-        side: THREE.DoubleSide,
-      });
-      const captureRing = new THREE.Mesh(captureRingGeo, captureRingMat);
+      const captureRing = meshPool.acquire(
+        'portalCaptureRing',
+        this.shared.portalCaptureRing!,
+        this.shared.portalCaptureRingMat!
+      );
       captureRing.rotation.x = -Math.PI / 2;
       captureRing.position.set(pos.c - 3.5, 0.13, pos.r - 3.5);
       layer.add(captureRing);
@@ -380,11 +596,9 @@ export class TimelineCol implements ITimelineCol {
   }
 
   clearTimeTravelTargets(): void {
-    // Remove all time travel target meshes from their parent layers
+    // Return all time travel target meshes to pool
     for (const mesh of this.timeTravelTargets) {
-      if (mesh.parent) {
-        mesh.parent.remove(mesh);
-      }
+      meshPool.release(mesh as PooledMesh);
     }
     this.timeTravelTargets = [];
   }
@@ -430,33 +644,31 @@ export class TimelineCol implements ITimelineCol {
     const turnIndex = this.historyLayers.length;
     const sqMeshes: Mesh[] = [];
 
+    // Use shared geometry and material for history base
     const base = new THREE.Mesh(
-      new THREE.BoxGeometry(8.2, 0.03, 8.2),
-      new THREE.MeshStandardMaterial({
-        color: 0x15152a,
-        transparent: true,
-        opacity: 0.25,
-        metalness: 0.5,
-        roughness: 0.5,
-      })
+      this.shared.historyBaseGeometry!,
+      this.shared.historyBaseMat!
     );
     base.position.y = -0.02;
+    base.frustumCulled = true;
     g.add(base);
 
+    // History squares - use shared geometry, per-instance materials for opacity control
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const isLight = (r + c) % 2 === 0;
         const m = new THREE.Mesh(
-          new THREE.BoxGeometry(0.93, 0.025, 0.93),
+          this.shared.historySquareGeometry!,
           new THREE.MeshStandardMaterial({
             color: isLight ? 0x5a5a88 : 0x38385a,  // Darker colors for history squares
             transparent: true,
-            opacity: 0.15,  // Lower opacity for more prominent grey-out
+            opacity: 0.15,
             metalness: 0.15,
             roughness: 0.8,
           })
         );
         m.position.set(c - 3.5, 0, r - 3.5);
+        m.frustumCulled = true;
         m.userData = {
           square: this._toSq(r, c),
           row: r,
@@ -480,10 +692,11 @@ export class TimelineCol implements ITimelineCol {
         const chKey = isW ? piece.type.toUpperCase() : piece.type;
         const tex = this._pieceTex(this._pieceChars[chKey], isW);
         const sp = new THREE.Sprite(
-          new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.25, depthWrite: false })  // Lower opacity for history pieces
+          new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.25, depthWrite: false })
         );
         sp.position.set(c2 - 3.5, 0.12, r2 - 3.5);
         sp.scale.set(0.7, 0.7, 0.7);
+        sp.frustumCulled = true;
         g.add(sp);
       }
     }
@@ -502,6 +715,13 @@ export class TimelineCol implements ITimelineCol {
       const obj = child as Mesh | Sprite;
       if ((obj as Sprite).isSprite && obj.material) {
         (obj.material as SpriteMaterial).dispose();
+      }
+      // Dispose per-instance materials for history squares
+      if ((obj as Mesh).isMesh && obj.material && obj !== layerGroup.children[0]) {
+        // Don't dispose shared materials
+        if ((obj.material as MeshStandardMaterial).opacity !== undefined) {
+          (obj.material as Material).dispose();
+        }
       }
     });
   }
@@ -643,13 +863,7 @@ export class TimelineCol implements ITimelineCol {
     // Clear history layers and dispose of their contents
     for (let i = 0; i < this.historyLayers.length; i++) {
       const layer = this.historyLayers[i];
-      // Dispose of sprites and materials within the layer
-      layer.traverse((child: Object3D) => {
-        const obj = child as Mesh | Sprite;
-        if ((obj as Sprite).isSprite && obj.material) {
-          (obj.material as SpriteMaterial).dispose();
-        }
-      });
+      this._removeHistorySquares(layer);
       this.group.remove(layer);
     }
     this.historyLayers = [];
@@ -662,8 +876,10 @@ export class TimelineCol implements ITimelineCol {
       this.interLayerGroup.remove(this.interLayerGroup.children[0]);
     }
     this.clearHighlights();
+
+    // Return last move highlights to pool
     for (let i = 0; i < this.lastMoveHL.length; i++) {
-      this.group.remove(this.lastMoveHL[i]);
+      meshPool.release(this.lastMoveHL[i] as PooledMesh);
     }
     this.lastMoveHL = [];
 
@@ -674,6 +890,12 @@ export class TimelineCol implements ITimelineCol {
 
   destroy(): void {
     this.clearAll();
+    // Dispose per-square materials
+    for (const mesh of this.squareMeshes) {
+      if (mesh.material) {
+        (mesh.material as Material).dispose();
+      }
+    }
     this.scene.remove(this.group);
   }
 }
@@ -849,6 +1071,8 @@ class Board3DManager implements IBoard3D {
 
     // Initialize shared materials for performance
     this._initSharedMaterials();
+    // Initialize shared resources singleton
+    SharedResources.getInstance();
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -960,7 +1184,7 @@ class Board3DManager implements IBoard3D {
   }
 
   /** Add a horizontal line showing cross-timeline piece movement */
-  addCrossTimelineLine(fromTlId: number, toTlId: number, square: string, isWhite: boolean): void {
+  addCrossTimelineLine(fromTlId: number, toTlId: number, square: string, _isWhite: boolean): void {
     const fromCol = this.timelineCols[fromTlId];
     const toCol = this.timelineCols[toTlId];
     if (!fromCol || !toCol || !this.branchLineGroup) return;
@@ -984,7 +1208,7 @@ class Board3DManager implements IBoard3D {
     targetTurnIndex: number,
     newTlId: number,
     square: string,
-    isWhite: boolean
+    _isWhite: boolean
   ): void {
     const sourceCol = this.timelineCols[sourceTlId];
     const newCol = this.timelineCols[newTlId];
@@ -1632,6 +1856,8 @@ class Board3DManager implements IBoard3D {
       }
     }
     this.controls?.target.set(0, 0, 0);
+    // Clear mesh pool when resetting game
+    meshPool.clear();
   }
 }
 
