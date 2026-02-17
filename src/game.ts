@@ -57,6 +57,9 @@ class GameManager {
     // Setup command input for programmatic testing
     this._setupCommandInput();
 
+    // Setup sidebar resize
+    this._setupSidebarResize();
+
     // Create the main timeline
     this._createTimeline(0, 0, null, -1, null);
     this.setActiveTimeline(0);
@@ -152,7 +155,10 @@ class GameManager {
     const speedSlider = document.getElementById('cpu-speed') as HTMLInputElement | null;
     if (speedSlider) {
       speedSlider.addEventListener('input', () => {
-        this.cpuSetDelay(parseInt(speedSlider.value));
+        // Invert: slider shows 100-2000, but we want higher slider = faster (lower delay)
+        // So delay = 2100 - sliderValue (100->2000, 2000->100)
+        const sliderVal = parseInt(speedSlider.value);
+        this.cpuSetDelay(2100 - sliderVal);
       });
     }
 
@@ -246,6 +252,41 @@ class GameManager {
         if (result.success) {
           input.value = '';
         }
+      }
+    });
+  }
+
+  /* -- Sidebar Resize -- */
+  private _setupSidebarResize(): void {
+    const sidebar = document.getElementById('sidebar');
+    const resizeHandle = document.getElementById('sidebar-resize');
+    if (!sidebar || !resizeHandle) return;
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizeHandle.addEventListener('mousedown', (e: MouseEvent) => {
+      isResizing = true;
+      startX = e.clientX;
+      startWidth = sidebar.offsetWidth;
+      resizeHandle.classList.add('dragging');
+      document.body.style.cursor = 'ew-resize';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e: MouseEvent) => {
+      if (!isResizing) return;
+      const diff = startX - e.clientX; // Negative because sidebar is on right
+      const newWidth = Math.max(180, Math.min(400, startWidth + diff));
+      sidebar.style.width = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isResizing) {
+        isResizing = false;
+        resizeHandle.classList.remove('dragging');
+        document.body.style.cursor = '';
       }
     });
   }
@@ -817,6 +858,11 @@ timelines - list timelines`,
       col.showLastMove(move.from, move.to);
     }
 
+    // Spawn capture effect if this was a capture
+    if (move.captured) {
+      Board3D.spawnCaptureEffect(tlId, move.to);
+    }
+
     this.clearSelection();
     this.renderTimeline(tlId);
     this.updateStatus();
@@ -1091,6 +1137,9 @@ timelines - list timelines`,
       sourceCol.showLastMove(sourceSquare, sourceSquare);
     }
 
+    // Spawn portal effect at departure point
+    Board3D.spawnPortalEffect(sourceTimelineId, sourceSquare);
+
     // 2. Create a NEW timeline branching from that historical point
     const newId = this.nextTimelineId++;
 
@@ -1187,6 +1236,14 @@ timelines - list timelines`,
     this.renderTimeline(newId);
     this.updateTimelineList();
     this._updateMoveSlider();
+
+    // Spawn portal effect at arrival point
+    Board3D.spawnPortalEffect(newId, sourceSquare);
+
+    // If captured a piece, also spawn capture effect
+    if (capturedPiece) {
+      Board3D.spawnCaptureEffect(newId, sourceSquare);
+    }
   }
 
   /** Helper: Modify a FEN string to change a square's piece and flip turn */
@@ -1324,7 +1381,19 @@ timelines - list timelines`,
   renderTimeline(tlId: number): void {
     const tl = this.timelines[tlId];
     if (!tl) return;
-    Board3D.getTimeline(tlId)?.render(tl.chess.board());
+    const col = Board3D.getTimeline(tlId);
+    if (!col) return;
+
+    col.render(tl.chess.board());
+
+    // Update board glow based on game state
+    if (tl.chess.in_checkmate()) {
+      col.setBoardGlow('checkmate');
+    } else if (tl.chess.in_draw() || tl.chess.in_stalemate()) {
+      col.setBoardGlow('draw');
+    } else {
+      col.setBoardGlow('none');
+    }
   }
 
   clearSelection(): void {

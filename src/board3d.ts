@@ -564,6 +564,28 @@ export class TimelineCol implements ITimelineCol {
     });
   }
 
+  /** Set board state glow (checkmate = red, draw = grey, none = clear) */
+  setBoardGlow(state: 'checkmate' | 'draw' | 'none'): void {
+    let glowColor: Color | null = null;
+    if (state === 'checkmate') {
+      glowColor = new THREE.Color(0xff3333);
+    } else if (state === 'draw') {
+      glowColor = new THREE.Color(0x888888);
+    }
+
+    // Apply glow to all square meshes on the main board
+    for (const mesh of this.squareMeshes) {
+      const mat = mesh.material as MeshStandardMaterial;
+      if (glowColor) {
+        mat.emissive = glowColor;
+        mat.emissiveIntensity = 0.3;
+      } else {
+        mat.emissive = new THREE.Color(0);
+        mat.emissiveIntensity = 0;
+      }
+    }
+  }
+
   clearAll(): void {
     for (let i = 0; i < this.historyLayers.length; i++) {
       this.group.remove(this.historyLayers[i]);
@@ -616,6 +638,14 @@ class Board3DManager implements IBoard3D {
   private _panSpeed = 0.12;  // Slowed down from 0.25 for smoother control
   private _zoomSpeed = 0.4;
   private _focusTween: FocusTween | undefined;
+
+  // Visual effects storage
+  private _activeEffects: Array<{
+    mesh: Mesh | Points;
+    startTime: number;
+    duration: number;
+    type: 'portal' | 'capture';
+  }> = [];
 
   readonly PIECE_CHARS: PieceCharMap = {
     K: '\u2654',
@@ -1107,20 +1137,26 @@ class Board3DManager implements IBoard3D {
       this.controls.target.add(move);
     }
 
-    // Q/E keyboard zoom
+    // Q/E keyboard rotation (slow orbit around target)
     if (this._panKeys.q || this._panKeys.e) {
-      const zoomDir = this._panKeys.e ? -1 : 1; // E = zoom in, Q = zoom out
-      const direction = new THREE.Vector3();
-      direction.subVectors(this.camera.position, this.controls.target).normalize();
+      const rotateDir = this._panKeys.q ? 1 : -1; // Q = rotate left, E = rotate right
+      const rotateSpeed = 0.015; // Slow rotation
 
-      const distance = this.camera.position.distanceTo(this.controls.target);
-      const zoomAmount = this._zoomSpeed * zoomDir;
+      // Get current camera position relative to target
+      const offset = new THREE.Vector3().subVectors(this.camera.position, this.controls.target);
 
-      // Respect min/max distance
-      const newDistance = distance + zoomAmount;
-      if (newDistance >= this.controls.minDistance && newDistance <= this.controls.maxDistance) {
-        this.camera.position.addScaledVector(direction, zoomAmount);
-      }
+      // Rotate around Y axis
+      const angle = rotateDir * rotateSpeed;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const newX = offset.x * cos - offset.z * sin;
+      const newZ = offset.x * sin + offset.z * cos;
+
+      offset.x = newX;
+      offset.z = newZ;
+
+      // Apply new position
+      this.camera.position.copy(this.controls.target).add(offset);
     }
   }
 
@@ -1172,6 +1208,9 @@ class Board3DManager implements IBoard3D {
     // Update focus animation
     this._updateFocusAnimation();
 
+    // Update visual effects
+    this._updateEffects();
+
     this.controls.update();
 
     if (this.particleSystem) {
@@ -1204,6 +1243,112 @@ class Board3DManager implements IBoard3D {
     }
 
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /** Create portal effect at a position (cyan-purple burst) */
+  spawnPortalEffect(timelineId: number, square: string): void {
+    if (!this.scene || !this._clock) return;
+    const col = this.timelineCols[timelineId];
+    if (!col) return;
+
+    const pos = this._squareToWorld(col.xOffset, square);
+
+    // Create a ring of particles expanding outward
+    const geo = new THREE.RingGeometry(0.1, 0.5, 16);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x44ffcc,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.position.set(pos.x, 0.3, pos.z);
+    ring.rotation.x = -Math.PI / 2;
+    this.scene.add(ring);
+
+    this._activeEffects.push({
+      mesh: ring,
+      startTime: this._clock.getElapsedTime(),
+      duration: 0.5,
+      type: 'portal',
+    });
+  }
+
+  /** Create capture effect at a position (red flash) */
+  spawnCaptureEffect(timelineId: number, square: string): void {
+    if (!this.scene || !this._clock) return;
+    const col = this.timelineCols[timelineId];
+    if (!col) return;
+
+    const pos = this._squareToWorld(col.xOffset, square);
+
+    // Create a flash sphere
+    const geo = new THREE.SphereGeometry(0.3, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff4444,
+      transparent: true,
+      opacity: 0.8,
+    });
+    const sphere = new THREE.Mesh(geo, mat);
+    sphere.position.set(pos.x, 0.4, pos.z);
+    this.scene.add(sphere);
+
+    this._activeEffects.push({
+      mesh: sphere,
+      startTime: this._clock.getElapsedTime(),
+      duration: 0.3,
+      type: 'capture',
+    });
+  }
+
+  /** Convert square notation to world position */
+  private _squareToWorld(xOffset: number, square: string): { x: number; z: number } {
+    const c = square.charCodeAt(0) - 97; // a=0, h=7
+    const r = 8 - parseInt(square[1]);   // 8=0, 1=7
+    return {
+      x: xOffset + c - 3.5,
+      z: r - 3.5,
+    };
+  }
+
+  /** Update visual effects (called in animate loop) */
+  private _updateEffects(): void {
+    if (!this._clock || !this.scene) return;
+    const t = this._clock.getElapsedTime();
+
+    for (let i = this._activeEffects.length - 1; i >= 0; i--) {
+      const eff = this._activeEffects[i];
+      const elapsed = t - eff.startTime;
+      const progress = elapsed / eff.duration;
+
+      if (progress >= 1) {
+        // Remove finished effect
+        this.scene.remove(eff.mesh);
+        eff.mesh.geometry?.dispose();
+        if (eff.mesh.material) {
+          if (Array.isArray(eff.mesh.material)) {
+            eff.mesh.material.forEach(m => m.dispose());
+          } else {
+            (eff.mesh.material as Material).dispose();
+          }
+        }
+        this._activeEffects.splice(i, 1);
+        continue;
+      }
+
+      // Animate based on type
+      if (eff.type === 'portal') {
+        // Expand ring outward and fade
+        const scale = 1 + progress * 2;
+        eff.mesh.scale.set(scale, scale, 1);
+        ((eff.mesh as Mesh).material as MeshStandardMaterial).opacity = 0.9 * (1 - progress);
+      } else if (eff.type === 'capture') {
+        // Expand sphere and fade quickly
+        const scale = 1 + progress * 1.5;
+        eff.mesh.scale.set(scale, scale, scale);
+        ((eff.mesh as Mesh).material as MeshStandardMaterial).opacity = 0.8 * (1 - progress);
+      }
+    }
   }
 
   clearAll(): void {

@@ -110,6 +110,7 @@ export interface ITimelineCol {
   addSnapshot(position: Board, moveFrom: string, moveTo: string, isWhite: boolean): void;
   setActive(active: boolean): void;
   setHighlighted(highlighted: boolean): void;
+  setBoardGlow(state: 'checkmate' | 'draw' | 'none'): void;
   getAllSquareMeshes(): THREE.Mesh[];
   clearAll(): void;
   destroy(): void;
@@ -138,5 +139,7 @@ export interface IBoard3D {
   setActiveTimeline(id: number): void;
   focusTimeline(id: number, animate: boolean): void;
   addBranchLine(fromTlId: number, fromTurn: number, toTlId: number): void;
+  spawnPortalEffect(timelineId: number, square: string): void;
+  spawnCaptureEffect(timelineId: number, square: string): void;
   clearAll(): void;
 }
