@@ -387,8 +387,9 @@ export class TimelineCol implements ITimelineCol {
     const b = this._sqToWorld(toSq, 0.09);
     a.x -= this.xOffset;
     b.x -= this.xOffset;
-    const col = isWhite ? 0x4488ff : 0xff7744;
-    this.moveLineGroup.add(Board3DManager._glowTube(a, b, col, 0.018, 0.07, false));
+    // Softer, more muted colors and much lower opacity for in-board move lines
+    const col = isWhite ? 0x6688bb : 0xbb8866;  // Lighter, desaturated blue/red
+    this.moveLineGroup.add(Board3DManager._glowTube(a, b, col, 0.012, 0.04, false, 0.3));  // Thinner, less glow, 30% opacity
   }
 
   /* history snapshot */
@@ -508,8 +509,9 @@ export class TimelineCol implements ITimelineCol {
       const toW = new THREE.Vector3().copy(this._sqToWorld(toSq, toY));
       fromW.x -= this.xOffset;
       toW.x -= this.xOffset;
-      const lineCol = isW ? 0x44ddff : 0xffaa33;
-      this.interLayerGroup.add(Board3DManager._glowTube(fromW, toW, lineCol, 0.025, 0.1, true));
+      // Softer, more muted inter-layer lines (same as move lines, but keep time travel visible)
+      const lineCol = isW ? 0x88bbdd : 0xddaa77;  // Lighter, desaturated cyan/orange
+      this.interLayerGroup.add(Board3DManager._glowTube(fromW, toW, lineCol, 0.018, 0.06, true, 0.4));
     }
   }
 
@@ -975,7 +977,8 @@ class Board3DManager implements IBoard3D {
     color: number,
     coreR: number,
     glowR: number,
-    arc: boolean
+    arc: boolean,
+    opacityScale: number = 1.0
   ): Group {
     const group = new THREE.Group();
     let curve: Curve<Vector3>;
@@ -1000,7 +1003,7 @@ class Board3DManager implements IBoard3D {
         new THREE.MeshBasicMaterial({
           color,
           transparent: true,
-          opacity: 0.1,
+          opacity: 0.1 * opacityScale,
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
           depthWrite: false,
@@ -1013,7 +1016,7 @@ class Board3DManager implements IBoard3D {
         new THREE.MeshBasicMaterial({
           color,
           transparent: true,
-          opacity: 0.22,
+          opacity: 0.22 * opacityScale,
           blending: THREE.AdditiveBlending,
           side: THREE.DoubleSide,
           depthWrite: false,
@@ -1026,7 +1029,7 @@ class Board3DManager implements IBoard3D {
         new THREE.MeshBasicMaterial({
           color: 0xffffff,
           transparent: true,
-          opacity: 0.75,
+          opacity: 0.75 * opacityScale,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
         })
@@ -1037,7 +1040,7 @@ class Board3DManager implements IBoard3D {
     const sm = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.6 * opacityScale,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });

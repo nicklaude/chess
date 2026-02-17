@@ -99,17 +99,64 @@ Prerequisites: Two timelines at same move count
 - [ ] F focuses on active timeline
 - [ ] C resets camera
 
-## Phase 4: Error Handling
+## Phase 4: Visual Polish & Move List Fix
 
-### Test 4.1: Invalid FEN Recovery
-- [ ] If FEN generation fails, game doesn't crash
-- [ ] Console shows error message
-- [ ] Game state remains playable
+### Test 4.1: Softer Move Lines
+Prerequisites: Make several moves to see move lines
+- [ ] In-board move lines (red/blue on current board) are soft and muted
+- [ ] Lines use lighter, desaturated colors (not harsh bright blue/red)
+- [ ] Lines are thin with minimal glow
+- [ ] Lines don't visually overpower the pieces
 
-### Test 4.2: State Consistency
+### Test 4.2: Softer Inter-Layer Lines
+- [ ] Vertical lines connecting history layers are visible but not harsh
+- [ ] Lines use lighter cyan/orange tones
+- [ ] Time travel and branch lines remain bright (those are important)
+
+### Test 4.3: Move List Per Timeline
+Prerequisites: Create 2+ timelines via time travel
+- [ ] Switch between timelines using Tab key
+- [ ] Move list updates correctly for each timeline
+- [ ] Move count in timeline panel is accurate per timeline
+- [ ] Playing a move on timeline A doesn't reset timeline B's move list
+- [ ] Move list shows custom notation for time travel (⟳)
+
+### Test 4.4: State Consistency
 - [ ] After time travel, can switch back to original timeline
 - [ ] Original timeline state unchanged
 - [ ] Can continue playing on both timelines
+
+## Phase 5: CPU Auto-Play Mode (Coming Soon)
+
+### Test 5.1: CPU Mode Button
+- [ ] "CPU Mode" button visible in sidebar
+- [ ] Clicking starts CPU vs CPU game
+
+### Test 5.2: Basic CPU Play
+- [ ] CPU makes legal moves automatically
+- [ ] Move pace is visible (not instant)
+- [ ] Both white and black move automatically
+
+### Test 5.3: Portal Awareness
+- [ ] CPU considers time travel portals when queen is available
+- [ ] CPU sometimes uses time travel to create new timelines
+- [ ] CPU can spawn multiple queens via time travel
+
+### Test 5.4: Cross-Timeline Awareness
+- [ ] CPU considers cross-timeline moves when available
+- [ ] CPU can move pieces between timelines
+
+### Test 5.5: Game Completion
+- [ ] Game continues until checkmate/draw
+- [ ] All timelines can reach completion
+- [ ] Multiple timelines can have different outcomes
+
+## Error Handling
+
+### Test 6.1: Invalid FEN Recovery
+- [ ] If FEN generation fails, game doesn't crash
+- [ ] Console shows error message
+- [ ] Game state remains playable
 
 ## Console Debug Checklist
 

@@ -1400,7 +1400,9 @@ timelines - list timelines`,
       movesEl.innerHTML = '';
       return;
     }
-    const history = tl.chess.history() as string[];
+    // Use moveHistory instead of chess.history() because chess.load() wipes history
+    // when we modify FEN for time travel/cross-timeline moves
+    const history = tl.moveHistory.map(m => m.san);
     let html = '';
     for (let i = 0; i < history.length; i += 2) {
       const num = Math.floor(i / 2) + 1;
@@ -1438,7 +1440,8 @@ timelines - list timelines`,
       const isActive = id === this.activeTimelineId;
       const color = colors[id % colors.length];
       const hexColor = '#' + color.toString(16).padStart(6, '0');
-      const turnCount = (tl.chess.history() as string[]).length;
+      // Use moveHistory instead of chess.history() because chess.load() wipes history
+      const turnCount = tl.moveHistory.length;
 
       // Check if this timeline has children (is a branch point)
       const hasChildren = childrenOf[id] && childrenOf[id].length > 0;
