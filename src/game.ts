@@ -1006,9 +1006,11 @@ timelines - list timelines`,
 
   /* -- Cross-Timeline Movement -- */
 
-  /** Check if a piece type can move across timelines (only Queen for now) */
+  /** Check if a piece type can move across timelines (all pieces except King) */
   private canMoveCrossTimeline(pieceType: PieceType): boolean {
-    return pieceType === 'q';  // Only Queen can cross timelines
+    // All pieces except King can cross timelines
+    // King cannot leave its board - would break check/checkmate logic
+    return pieceType !== 'k';
   }
 
   /** Get all valid cross-timeline targets for a piece */
@@ -2360,6 +2362,24 @@ timelines - list timelines`,
       }
     }
 
+    // Check for cross-timeline opportunity (can always happen if multiple timelines exist)
+    const crossTimelineMove = this._cpuCheckCrossTimeline(tlId);
+    if (crossTimelineMove) {
+      console.log('[CPU] Crossing timelines!', {
+        color: isWhite ? 'white' : 'black',
+        from: tlId,
+        to: crossTimelineMove.targetTimelineId,
+        piece: crossTimelineMove.piece.type,
+      });
+      this.makeCrossTimelineMove(
+        tlId,
+        crossTimelineMove.targetTimelineId,
+        crossTimelineMove.square,
+        crossTimelineMove.piece
+      );
+      return true;
+    }
+
     // Otherwise, pick a random legal move (with preference for captures based on setting)
     const captures = moves.filter(m => m.captured);
     let move: ChessMove;
@@ -2426,6 +2446,77 @@ timelines - list timelines`,
     for (const opp of pool) {
       if (Math.random() < opp.bias) {
         return { ...opp.target, sourceSquare: opp.sourceSquare, piece: opp.piece };
+      }
+    }
+
+    return null;
+  }
+
+  /** Check if CPU has a cross-timeline opportunity on this timeline */
+  private _cpuCheckCrossTimeline(tlId: number): { targetTimelineId: number; square: Square; piece: Piece; isCapture: boolean } | null {
+    const tl = this.timelines[tlId];
+    if (!tl) return null;
+
+    // Need at least 2 timelines to cross
+    if (Object.keys(this.timelines).length < 2) return null;
+
+    const color = tl.chess.turn();
+    const board = tl.chess.board();
+    const isWhite = color === 'w';
+    const portalBiases = isWhite ? this.cpuWhitePortalBias : this.cpuBlackPortalBias;
+
+    // Collect all cross-timeline opportunities
+    const opportunities: Array<{
+      targetTimelineId: number;
+      square: Square;
+      piece: Piece;
+      isCapture: boolean;
+      bias: number;
+    }> = [];
+
+    // Find pieces that can cross timelines (all except king)
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = board[r][c];
+        if (piece && piece.type !== 'k' && piece.color === color) {
+          const bias = portalBiases[piece.type] || 0.1;  // Default 10% for pieces without explicit bias
+          if (bias <= 0) continue;
+
+          const square = (String.fromCharCode(97 + c) + (8 - r)) as Square;
+          const targets = this.getCrossTimelineTargets(tlId, square, piece);
+
+          for (const target of targets) {
+            opportunities.push({
+              targetTimelineId: target.targetTimelineId,
+              square,
+              piece,
+              isCapture: target.isCapture,
+              bias,
+            });
+          }
+        }
+      }
+    }
+
+    if (opportunities.length === 0) return null;
+
+    // Prefer captures, use highest-bias piece type
+    const captures = opportunities.filter(o => o.isCapture);
+    const pool = captures.length > 0 ? captures : opportunities;
+
+    // Sort by bias (highest first)
+    pool.sort((a, b) => b.bias - a.bias);
+
+    // Pick the first opportunity that passes its bias check (lower chance than time travel)
+    for (const opp of pool) {
+      // Cross-timeline is less dramatic than time travel, use half the bias
+      if (Math.random() < opp.bias * 0.5) {
+        return {
+          targetTimelineId: opp.targetTimelineId,
+          square: opp.square,
+          piece: opp.piece,
+          isCapture: opp.isCapture,
+        };
       }
     }
 
