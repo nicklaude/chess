@@ -45,6 +45,9 @@ class GameManager {
       resetBtn.addEventListener('click', () => this.reset());
     }
 
+    // Setup CPU controls
+    this._setupCpuControls();
+
     // Setup keyboard navigation
     this._setupKeyboardNav();
 
@@ -130,6 +133,47 @@ class GameManager {
     if (slider) {
       slider.addEventListener('input', () => {
         this.goToMove(parseInt(slider.value));
+      });
+    }
+  }
+
+  /* -- CPU Controls -- */
+  private _setupCpuControls(): void {
+    const cpuToggle = document.getElementById('cpu-toggle');
+    if (cpuToggle) {
+      cpuToggle.addEventListener('click', () => this.cpuToggle());
+    }
+
+    const speedSlider = document.getElementById('cpu-speed') as HTMLInputElement | null;
+    if (speedSlider) {
+      speedSlider.addEventListener('input', () => {
+        this.cpuSetDelay(parseInt(speedSlider.value));
+      });
+    }
+
+    const portalSlider = document.getElementById('cpu-portal') as HTMLInputElement | null;
+    if (portalSlider) {
+      portalSlider.addEventListener('input', () => {
+        this.cpuSetPortalBias(parseInt(portalSlider.value) / 100);
+      });
+    }
+
+    const cameraToggle = document.getElementById('cpu-camera-toggle');
+    if (cameraToggle) {
+      cameraToggle.addEventListener('click', () => {
+        this.cpuCameraFollow = !this.cpuCameraFollow;
+        this._updateCpuUI();
+      });
+    }
+
+    // Disable camera follow when user pans manually
+    const sceneContainer = document.getElementById('scene-container');
+    if (sceneContainer) {
+      sceneContainer.addEventListener('pointerdown', () => {
+        if (this.cpuEnabled && this.cpuCameraFollow) {
+          this.cpuCameraFollow = false;
+          this._updateCpuUI();
+        }
       });
     }
   }
@@ -224,7 +268,7 @@ timelines - list timelines`,
       if (!target) {
         return { success: false, message: `No time travel target at turn ${turnIdx}` };
       }
-      this.makeTimeTravelMove(
+      this._makeTimeTravelMove(
         this.timeTravelSelection.sourceTimelineId,
         this.timeTravelSelection.sourceSquare,
         target.targetTurnIndex,
@@ -457,7 +501,7 @@ timelines - list timelines`,
       );
       if (target) {
         // Execute time travel move!
-        this.makeTimeTravelMove(
+        this._makeTimeTravelMove(
           this.timeTravelSelection.sourceTimelineId,
           this.timeTravelSelection.sourceSquare,
           target.targetTurnIndex,
@@ -554,7 +598,7 @@ timelines - list timelines`,
         }
 
         // Check for time travel capability (queen moving backward in time)
-        const timeTravelTargets = this.getTimeTravelTargets(tlId, sq as Square, piece);
+        const timeTravelTargets = this._getTimeTravelTargets(tlId, sq as Square, piece);
         if (timeTravelTargets.length > 0) {
           this.timeTravelSelection = {
             sourceTimelineId: tlId,
@@ -874,7 +918,7 @@ timelines - list timelines`,
   /* -- Time Travel Movement (backward in time) -- */
 
   /** Get all valid time travel targets for a queen (moving backward in time) */
-  private getTimeTravelTargets(
+  private _getTimeTravelTargets(
     sourceTimelineId: number,
     square: Square,
     piece: Piece
@@ -919,7 +963,7 @@ timelines - list timelines`,
   }
 
   /** Execute a time travel move - queen goes back in time, creating a new timeline */
-  private makeTimeTravelMove(
+  private _makeTimeTravelMove(
     sourceTimelineId: number,
     sourceSquare: Square,
     targetTurnIndex: number,
@@ -1601,6 +1645,203 @@ timelines - list timelines`,
     this.renderTimeline(0);
     this.updateStatus();
     this.updateTimelineList();
+  }
+
+  /* -- CPU Mode -- */
+
+  // CPU state
+  private cpuEnabled = false;
+  private cpuTimer: number | null = null;
+  private cpuMoveDelay = 400;  // ms between moves (faster for visual effect)
+  private cpuPortalBias = 0.3; // 30% chance to use portal when available
+  private maxTimelines = 10;   // Limit timeline creation
+  private cpuCameraFollow = true;  // Auto-follow moves with camera
+
+  /** Start CPU auto-play mode */
+  cpuStart(): void {
+    if (this.cpuEnabled) return;
+    this.cpuEnabled = true;
+    this._cpuTick();
+    this._updateCpuUI();
+  }
+
+  /** Stop CPU auto-play mode */
+  cpuStop(): void {
+    this.cpuEnabled = false;
+    if (this.cpuTimer !== null) {
+      clearTimeout(this.cpuTimer);
+      this.cpuTimer = null;
+    }
+    this._updateCpuUI();
+  }
+
+  /** Toggle CPU mode */
+  cpuToggle(): void {
+    if (this.cpuEnabled) {
+      this.cpuStop();
+    } else {
+      this.cpuStart();
+    }
+  }
+
+  /** Set move delay (100-2000ms) */
+  cpuSetDelay(ms: number): void {
+    this.cpuMoveDelay = Math.max(100, Math.min(2000, ms));
+  }
+
+  /** Set portal bias (0-1) */
+  cpuSetPortalBias(bias: number): void {
+    this.cpuPortalBias = Math.max(0, Math.min(1, bias));
+  }
+
+  /** Toggle camera follow mode */
+  cpuSetCameraFollow(follow: boolean): void {
+    this.cpuCameraFollow = follow;
+    this._updateCpuUI();
+  }
+
+  /** Main CPU tick - called repeatedly while enabled */
+  private _cpuTick(): void {
+    if (!this.cpuEnabled) return;
+
+    // Find a timeline where we can play (no game over check - fight continues!)
+    const tlId = this._cpuSelectTimeline();
+    if (tlId === -1) {
+      // No playable timelines - all are in checkmate/stalemate
+      // Keep ticking in case new timelines are created via time travel
+      this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
+      return;
+    }
+
+    // Make a move on that timeline
+    const moved = this._cpuMakeMove(tlId);
+    if (!moved) {
+      console.log('[CPU] Could not make move on timeline', tlId);
+    }
+
+    // Schedule next tick
+    this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
+  }
+
+  /** Select a timeline to play on (where it's this color's turn) */
+  private _cpuSelectTimeline(): number {
+    // Get current turn color from main timeline
+    const mainTl = this.timelines[0];
+    if (!mainTl) return -1;
+
+    // Find all timelines where it's this color's turn
+    const color = mainTl.chess.turn();
+    const playable: number[] = [];
+
+    for (const key in this.timelines) {
+      const tl = this.timelines[parseInt(key)];
+      if (tl.chess.turn() === color && !tl.chess.in_checkmate() && !tl.chess.in_stalemate()) {
+        playable.push(tl.id);
+      }
+    }
+
+    if (playable.length === 0) return -1;
+
+    // Prefer main timeline, otherwise random
+    if (playable.includes(0)) return 0;
+    return playable[Math.floor(Math.random() * playable.length)];
+  }
+
+  /** Make a CPU move on the given timeline */
+  private _cpuMakeMove(tlId: number): boolean {
+    const tl = this.timelines[tlId];
+    if (!tl) return false;
+
+    // Switch to this timeline and animate camera if follow mode enabled
+    if (this.activeTimelineId !== tlId) {
+      this.setActiveTimeline(tlId);
+      if (this.cpuCameraFollow) {
+        Board3D.focusTimeline(tlId, true);
+      }
+    }
+
+    // Get legal moves
+    const moves = tl.chess.moves({ verbose: true }) as ChessMove[];
+    if (moves.length === 0) return false;
+
+    // Check for time travel opportunity (if we have a queen and under timeline limit)
+    if (Object.keys(this.timelines).length < this.maxTimelines) {
+      const timeTravelMove = this._cpuCheckTimeTravel(tlId);
+      if (timeTravelMove && Math.random() < this.cpuPortalBias) {
+        // Execute time travel move!
+        console.log('[CPU] Time traveling!', timeTravelMove);
+        this._makeTimeTravelMove(
+          tlId,
+          timeTravelMove.sourceSquare,
+          timeTravelMove.targetTurnIndex,
+          timeTravelMove.piece,
+          timeTravelMove.isCapture ? timeTravelMove.capturedPiece : null
+        );
+        return true;
+      }
+    }
+
+    // Otherwise, pick a random legal move (with slight preference for captures)
+    const captures = moves.filter(m => m.captured);
+    let move: ChessMove;
+
+    if (captures.length > 0 && Math.random() < 0.7) {
+      // 70% chance to capture if available
+      move = captures[Math.floor(Math.random() * captures.length)];
+    } else {
+      move = moves[Math.floor(Math.random() * moves.length)];
+    }
+
+    // Execute the move
+    this.makeMove(tlId, move);
+    return true;
+  }
+
+  /** Check if CPU has a time travel opportunity on this timeline */
+  private _cpuCheckTimeTravel(tlId: number): TimeTravelTarget & { sourceSquare: Square; piece: Piece } | null {
+    const tl = this.timelines[tlId];
+    if (!tl) return null;
+
+    const color = tl.chess.turn();
+    const board = tl.chess.board();
+
+    // Find queens of current color
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = board[r][c];
+        if (piece && piece.type === 'q' && piece.color === color) {
+          const square = (String.fromCharCode(97 + c) + (8 - r)) as Square;
+          const targets = this._getTimeTravelTargets(tlId, square, piece);
+
+          if (targets.length > 0) {
+            // Pick a random target, preferring captures
+            const captureTargets = targets.filter(t => t.isCapture);
+            const target = captureTargets.length > 0
+              ? captureTargets[Math.floor(Math.random() * captureTargets.length)]
+              : targets[Math.floor(Math.random() * targets.length)];
+
+            return { ...target, sourceSquare: square, piece };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /** Update CPU UI elements */
+  private _updateCpuUI(): void {
+    const btn = document.getElementById('cpu-toggle');
+    if (btn) {
+      btn.textContent = this.cpuEnabled ? 'Stop CPU' : 'Start CPU';
+      btn.classList.toggle('active', this.cpuEnabled);
+    }
+
+    const cameraBtn = document.getElementById('cpu-camera-toggle');
+    if (cameraBtn) {
+      cameraBtn.textContent = this.cpuCameraFollow ? 'Camera Follow: ON' : 'Camera Follow: OFF';
+      cameraBtn.classList.toggle('active', this.cpuCameraFollow);
+    }
   }
 }
 

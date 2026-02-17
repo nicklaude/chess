@@ -16,7 +16,15 @@
                 <div id="timeline-list"></div>
             </div>
             <div id="moves"></div>
-            <button id="reset">New Game</button>
+            <div id="button-row">
+                <button id="reset">New Game</button>
+                <button id="cpu-toggle">Start CPU</button>
+            </div>
+            <div id="cpu-controls">
+                <label>Speed: <input type="range" id="cpu-speed" min="100" max="2000" value="400" step="100"></label>
+                <label>Portal: <input type="range" id="cpu-portal" min="0" max="100" value="30" step="5"></label>
+                <button id="cpu-camera-toggle" class="active">Camera Follow: ON</button>
+            </div>
             <div id="command-panel">
                 <input type="text" id="command-input" placeholder="e2e4 or fen or help">
                 <div id="command-output"></div>
@@ -39,6 +47,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <!-- TypeScript compiled bundle (with cache buster) -->
-    <script src="dist/bundle.js?v=20260217c"></script>
+    <script src="dist/bundle.js?v=20260217e"></script>
 </body>
 </html>
