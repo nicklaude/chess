@@ -66,6 +66,9 @@ class GameManager {
     this.renderTimeline(0);
     this.updateStatus();
     this.updateTimelineList();
+
+    // Setup collapsible shortcuts panel
+    this._setupCollapsibleShortcuts();
   }
 
   /* -- Keyboard Navigation -- */
@@ -571,6 +574,9 @@ timelines - list timelines`,
     this.updateStatus();
     this.updateMoveList();
     this.updateTimelineList();
+
+    // Setup collapsible shortcuts panel
+    this._setupCollapsibleShortcuts();
     this._updateMoveSlider();
 
     // Auto-focus on the new timeline with animation (if switching timelines and autoFocus enabled)
@@ -803,6 +809,9 @@ timelines - list timelines`,
     }
 
     this.updateTimelineList();
+
+    // Setup collapsible shortcuts panel
+    this._setupCollapsibleShortcuts();
   }
 
   /* -- Move execution -- */
@@ -870,6 +879,9 @@ timelines - list timelines`,
     this.updateStatus();
     this.updateMoveList();
     this.updateTimelineList();
+
+    // Setup collapsible shortcuts panel
+    this._setupCollapsibleShortcuts();
     this._updateMoveSlider();
   }
 
@@ -1017,6 +1029,9 @@ timelines - list timelines`,
     this.updateStatus();
     this.updateMoveList();
     this.updateTimelineList();
+
+    // Setup collapsible shortcuts panel
+    this._setupCollapsibleShortcuts();
     this._updateMoveSlider();
   }
 
@@ -1874,6 +1889,9 @@ timelines - list timelines`,
     this.renderTimeline(0);
     this.updateStatus();
     this.updateTimelineList();
+
+    // Setup collapsible shortcuts panel
+    this._setupCollapsibleShortcuts();
   }
 
   /* -- CPU Mode -- */
