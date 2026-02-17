@@ -132,9 +132,9 @@ export class TimelineCol implements ITimelineCol {
           color: isLight ? 0x7575a8 : 0x44446e,
           metalness: 0.15,
           roughness: 0.75,
-          side: THREE.FrontSide,  // Only visible from above, not below
+          side: THREE.DoubleSide,  // Visible from both above and below
         });
-        // Use PlaneGeometry for single-sided squares (invisible from below)
+        // Use PlaneGeometry for flat squares (DoubleSide makes them visible from below too)
         const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.96), mat);
         mesh.rotation.x = -Math.PI / 2;  // Rotate to lie flat
         mesh.position.set(c - 3.5, 0.035, r - 3.5);  // Slight y offset to sit on base
@@ -313,16 +313,18 @@ export class TimelineCol implements ITimelineCol {
       for (let c = 0; c < 8; c++) {
         const isLight = (r + c) % 2 === 0;
         const m = new THREE.Mesh(
-          new THREE.BoxGeometry(0.93, 0.025, 0.93),
+          new THREE.PlaneGeometry(0.93, 0.93),
           new THREE.MeshStandardMaterial({
             color: isLight ? 0x7575a8 : 0x44446e,
             transparent: true,
             opacity: 0.2,
             metalness: 0.15,
             roughness: 0.8,
+            side: THREE.DoubleSide,  // Visible from both sides
           })
         );
-        m.position.set(c - 3.5, 0, r - 3.5);
+        m.rotation.x = -Math.PI / 2;  // Rotate to lie flat
+        m.position.set(c - 3.5, 0.01, r - 3.5);
         m.userData = {
           square: this._toSq(r, c),
           row: r,
