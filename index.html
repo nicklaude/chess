@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>6D Chess</title>
     <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
     <div id="app">
@@ -20,7 +21,7 @@
             <div id="button-row">
                 <button id="reset">New Game</button>
                 <button id="cpu-toggle">Start CPU</button>
-                <button id="cpu-pause" disabled>Pause</button>
+                <button id="cpu-pause" disabled><i data-lucide="pause"></i></button>
             </div>
             <div id="cpu-controls">
                 <label>Speed: <input type="range" id="cpu-speed" min="100" max="2000" value="400" step="100"></label>
@@ -71,6 +72,7 @@
                 <div class="shortcut-row"><span class="key">Arrows</span> Navigate moves</div>
                 <div class="shortcut-row"><span class="key">Home / End</span> First/last move</div>
             </div>
+            <div id="version-info">v0.1.18</div>
         </div>
     </div>
     <!-- External libraries from CDN -->
@@ -78,6 +80,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <!-- TypeScript compiled bundle (with cache buster) -->
-    <script src="dist/bundle.js?v=20260217j"></script>
+    <script src="dist/bundle.js?v=20260217k"></script>
 </body>
 </html>

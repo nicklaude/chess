@@ -678,3 +678,26 @@ body {
 #command-output.error {
     color: #ff6666;
 }
+
+/* Version info */
+#version-info {
+    font-size: 0.55rem;
+    color: #555566;
+    text-align: right;
+    padding: 0.2rem 0.4rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+    letter-spacing: 0.02em;
+}
+
+/* Pause button icon styling */
+#cpu-pause {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+}
+
+#cpu-pause svg {
+    width: 16px;
+    height: 16px;
+}
