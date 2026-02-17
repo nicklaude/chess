@@ -855,9 +855,12 @@ timelines - list timelines`,
     const newId = this.nextTimelineId++;
 
     // Calculate x offset: alternate left/right of parent
-    const existingCount = Object.keys(this.timelines).length;
-    const side = existingCount % 2 === 0 ? 1 : -1;
-    const xOffset = parentTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil(existingCount / 2);
+    // Use sibling count (children of same parent) instead of total timeline count
+    // to prevent exponential spacing growth
+    const siblingCount = Object.values(this.timelines)
+      .filter(tl => tl.parentId === parentTlId).length;
+    const side = siblingCount % 2 === 0 ? 1 : -1;
+    const xOffset = parentTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil((siblingCount + 1) / 2);
 
     const newTl = this._createTimeline(newId, xOffset, parentTlId, snapshotIdx, fen);
 
@@ -1321,9 +1324,12 @@ timelines - list timelines`,
     const newId = this.nextTimelineId++;
 
     // Calculate x offset: alternate left/right of parent
-    const existingCount = Object.keys(this.timelines).length;
-    const side = existingCount % 2 === 0 ? 1 : -1;
-    const xOffset = sourceTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil(existingCount / 2);
+    // Use sibling count (children of same parent) instead of total timeline count
+    // to prevent exponential spacing growth
+    const siblingCount = Object.values(this.timelines)
+      .filter(tl => tl.parentId === sourceTimelineId).length;
+    const side = siblingCount % 2 === 0 ? 1 : -1;
+    const xOffset = sourceTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil((siblingCount + 1) / 2);
 
     console.log('[Time Travel] Creating new timeline:', {
       originalFen: fen,
