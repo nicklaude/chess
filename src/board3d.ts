@@ -132,9 +132,12 @@ export class TimelineCol implements ITimelineCol {
           color: isLight ? 0x7575a8 : 0x44446e,
           metalness: 0.15,
           roughness: 0.75,
+          side: THREE.FrontSide,  // Only visible from above, not below
         });
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.07, 0.96), mat);
-        mesh.position.set(c - 3.5, 0, r - 3.5);
+        // Use PlaneGeometry for single-sided squares (invisible from below)
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.96), mat);
+        mesh.rotation.x = -Math.PI / 2;  // Rotate to lie flat
+        mesh.position.set(c - 3.5, 0.035, r - 3.5);  // Slight y offset to sit on base
         mesh.receiveShadow = true;
         mesh.userData = {
           square: this._toSq(r, c),
