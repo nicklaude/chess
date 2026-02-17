@@ -1410,15 +1410,16 @@ class Board3DManager implements IBoard3D {
       ctx.lineWidth = 1.5;
       ctx.strokeText(symbol, s / 2, s / 2);
     } else {
-      // Black pieces: darker fill with bright outline for contrast
-      ctx.shadowColor = 'rgba(0,0,0,0.7)';
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = '#1a1a28';  // Much darker fill
+      // Black pieces: solid dark fill with subtle dark outline
+      // Use a purplish-black that's clearly distinct from white
+      ctx.shadowColor = 'rgba(20,10,40,0.8)';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = '#252035';  // Dark purple-black
       ctx.fillText(symbol, s / 2, s / 2);
       ctx.shadowBlur = 0;
-      // Bright outline to make them pop against the board
-      ctx.strokeStyle = '#ccccee';
-      ctx.lineWidth = 3;
+      // Dark outline (not white/bright)
+      ctx.strokeStyle = '#151020';
+      ctx.lineWidth = 2;
       ctx.strokeText(symbol, s / 2, s / 2);
     }
     const tex = new THREE.CanvasTexture(cv);

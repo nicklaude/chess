@@ -1171,6 +1171,26 @@ timelines - list timelines`,
     const sourceTl = this.timelines[sourceTimelineId];
     if (!sourceTl) return;
 
+    // VALIDATION: Verify the piece actually exists at the source square
+    const actualPiece = sourceTl.chess.get(sourceSquare);
+    if (!actualPiece) {
+      console.error('[Time Travel] ABORT: No piece at source square!', {
+        sourceSquare,
+        expectedPiece: piece,
+        actualBoard: sourceTl.chess.fen(),
+      });
+      return;
+    }
+    if (actualPiece.type !== piece.type || actualPiece.color !== piece.color) {
+      console.error('[Time Travel] ABORT: Piece mismatch at source!', {
+        sourceSquare,
+        expectedPiece: piece,
+        actualPiece,
+        fen: sourceTl.chess.fen(),
+      });
+      return;
+    }
+
     const isWhite = piece.color === 'w';
 
     // Convert turnIndex to snapshot index
@@ -1234,6 +1254,8 @@ timelines - list timelines`,
     if (sourceCol) {
       sourceCol.addSnapshot(this._getSnapshotBoard(sourceBoardBefore), sourceSquare, sourceSquare, isWhite);
       sourceCol.showLastMove(sourceSquare, sourceSquare);
+      // Immediately re-render to show piece removal (don't wait until end)
+      sourceCol.render(sourceTl.chess.board());
     }
 
     // Spawn portal effect at departure point
