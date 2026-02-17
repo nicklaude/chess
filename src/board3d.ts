@@ -424,7 +424,8 @@ export class TimelineCol implements ITimelineCol {
   /* render pieces on current board */
   render(position: Board): void {
     // Remove and dispose of old piece sprites to prevent stacking and memory leaks
-    for (let i = 0; i < this.pieceMeshes.length; i++) {
+    // Use reverse iteration to safely remove during iteration
+    for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
       const sprite = this.pieceMeshes[i];
       this.group.remove(sprite);
       // Dispose of the sprite material to prevent memory leaks
@@ -433,8 +434,32 @@ export class TimelineCol implements ITimelineCol {
         (sprite.material as SpriteMaterial).dispose();
       }
     }
-    this.pieceMeshes = [];
+    this.pieceMeshes.length = 0;  // Clear array in place
 
+    // Also do a safety check - remove any orphaned sprites from the group
+    // This catches edge cases where sprites weren't properly tracked
+    const toRemove: Object3D[] = [];
+    this.group.traverse((child: Object3D) => {
+      if ((child as Sprite).isSprite && child !== this.group) {
+        // Check if this sprite is at piece height (y = 0.22) - those are board pieces
+        if (Math.abs(child.position.y - 0.22) < 0.01) {
+          // Check if this sprite is NOT in our text labels (file/rank labels at edges)
+          const x = child.position.x;
+          const z = child.position.z;
+          if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
+            toRemove.push(child);
+          }
+        }
+      }
+    });
+    for (const obj of toRemove) {
+      this.group.remove(obj);
+      if ((obj as Sprite).material) {
+        ((obj as Sprite).material as SpriteMaterial).dispose();
+      }
+    }
+
+    // Now add fresh piece sprites
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const piece = position[r][c];
@@ -851,14 +876,14 @@ export class TimelineCol implements ITimelineCol {
 
   clearAll(): void {
     // Clear and dispose of piece sprites to prevent stacking
-    for (let i = 0; i < this.pieceMeshes.length; i++) {
+    for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
       const sprite = this.pieceMeshes[i];
       this.group.remove(sprite);
       if (sprite.material) {
         (sprite.material as SpriteMaterial).dispose();
       }
     }
-    this.pieceMeshes = [];
+    this.pieceMeshes.length = 0;
 
     // Clear history layers and dispose of their contents
     for (let i = 0; i < this.historyLayers.length; i++) {
