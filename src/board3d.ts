@@ -174,8 +174,15 @@ export class TimelineCol implements ITimelineCol {
 
   /* render pieces on current board */
   render(position: Board): void {
+    // Remove and dispose of old piece sprites to prevent stacking and memory leaks
     for (let i = 0; i < this.pieceMeshes.length; i++) {
-      this.group.remove(this.pieceMeshes[i]);
+      const sprite = this.pieceMeshes[i];
+      this.group.remove(sprite);
+      // Dispose of the sprite material to prevent memory leaks
+      // Note: We don't dispose of the texture since it's cached and shared
+      if (sprite.material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
     }
     this.pieceMeshes = [];
 
@@ -489,6 +496,14 @@ export class TimelineCol implements ITimelineCol {
   private _removeHistorySquares(layerGroup: Group): void {
     const toRemove = (layerGroup.userData.sqMeshes as Mesh[]) || [];
     this.historySquareMeshes = this.historySquareMeshes.filter((m) => toRemove.indexOf(m) === -1);
+
+    // Dispose of all sprites and materials in the layer to prevent memory leaks
+    layerGroup.traverse((child: Object3D) => {
+      const obj = child as Mesh | Sprite;
+      if ((obj as Sprite).isSprite && obj.material) {
+        (obj.material as SpriteMaterial).dispose();
+      }
+    });
   }
 
   private _layoutLayers(): void {
@@ -615,8 +630,27 @@ export class TimelineCol implements ITimelineCol {
   }
 
   clearAll(): void {
+    // Clear and dispose of piece sprites to prevent stacking
+    for (let i = 0; i < this.pieceMeshes.length; i++) {
+      const sprite = this.pieceMeshes[i];
+      this.group.remove(sprite);
+      if (sprite.material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
+    }
+    this.pieceMeshes = [];
+
+    // Clear history layers and dispose of their contents
     for (let i = 0; i < this.historyLayers.length; i++) {
-      this.group.remove(this.historyLayers[i]);
+      const layer = this.historyLayers[i];
+      // Dispose of sprites and materials within the layer
+      layer.traverse((child: Object3D) => {
+        const obj = child as Mesh | Sprite;
+        if ((obj as Sprite).isSprite && obj.material) {
+          (obj.material as SpriteMaterial).dispose();
+        }
+      });
+      this.group.remove(layer);
     }
     this.historyLayers = [];
     this.historySquareMeshes = [];
@@ -632,6 +666,10 @@ export class TimelineCol implements ITimelineCol {
       this.group.remove(this.lastMoveHL[i]);
     }
     this.lastMoveHL = [];
+
+    // Clear cross-timeline and time-travel targets
+    this.clearCrossTimelineTargets();
+    this.clearTimeTravelTargets();
   }
 
   destroy(): void {
