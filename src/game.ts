@@ -954,11 +954,12 @@ timelines - list timelines`,
     }
 
     // Store the actual promotion piece used (if any)
+    // Use result.captured (actual move result) instead of move.captured (potential move)
     tl.moveHistory.push({
       from: move.from as Move['from'],
       to: move.to as Move['to'],
       piece: move.piece,
-      captured: move.captured || null,
+      captured: result.captured || null,
       san: result.san,
       isWhite,
       promotion: result.promotion || null,
@@ -980,7 +981,7 @@ timelines - list timelines`,
     Board3D.notifySnapshotAdded(tlId);
 
     // Spawn capture effect if this was a capture
-    if (move.captured) {
+    if (result.captured) {
       Board3D.spawnCaptureEffect(tlId, move.to);
     }
 
@@ -1089,12 +1090,14 @@ timelines - list timelines`,
 
     // Build new FEN without the piece
     // For simplicity, we set the square to empty and flip turn
-    const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite);
+    // Source: piece left, no capture on source timeline
+    const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite, false);
     sourceTl.chess.load(newSourceFen);
 
     // 2. Add piece to target timeline (capture if enemy piece there)
     const targetFen = targetTl.chess.fen();
-    const newTargetFen = this._modifyFen(targetFen, square, piece, !isWhite);
+    const isCrossCapture = targetPiece !== null;
+    const newTargetFen = this._modifyFen(targetFen, square, piece, !isWhite, isCrossCapture);
     targetTl.chess.load(newTargetFen);
 
     // 3. Record the move in both timelines
@@ -1143,6 +1146,11 @@ timelines - list timelines`,
     // Notify that snapshots were added - triggers branch line rebuild
     Board3D.notifySnapshotAdded(sourceTimelineId);
     Board3D.notifySnapshotAdded(targetTimelineId);
+
+    // Spawn capture effect on target timeline if capture occurred
+    if (targetPiece) {
+      Board3D.spawnCaptureEffect(targetTimelineId, square);
+    }
 
     // 5. Update UI
     console.log('[crossTimeline] VISUAL_TRAILS_DEBUG: About to render after cross-timeline move', {
@@ -1290,7 +1298,8 @@ timelines - list timelines`,
 
     // 1. Remove piece from source timeline (it traveled away)
     const sourceFen = sourceTl.chess.fen();
-    const newSourceFen = this._modifyFen(sourceFen, sourceSquare, null, !isWhite);
+    // Source: piece left via time travel, no capture on source timeline
+    const newSourceFen = this._modifyFen(sourceFen, sourceSquare, null, !isWhite, false);
     sourceTl.chess.load(newSourceFen);
 
     // Record the departure move on source timeline
@@ -1367,6 +1376,17 @@ timelines - list timelines`,
     fenParts[1] = isWhite ? 'b' : 'w';
     // Reset en passant on new timeline (historical en passant no longer valid)
     fenParts[3] = '-';
+    // Halfmove clock: reset if capture, otherwise increment
+    const wasCapture = existingPiece !== null;
+    if (wasCapture) {
+      fenParts[4] = '0';
+    } else {
+      fenParts[4] = String(parseInt(fenParts[4] || '0') + 1);
+    }
+    // Fullmove number: increment when it becomes white's turn (after black moved)
+    if (fenParts[1] === 'w') {
+      fenParts[5] = String(parseInt(fenParts[5] || '1') + 1);
+    }
     const fixedFen = fenParts.join(' ');
     const loadResult = newTl.chess.load(fixedFen);
     if (!loadResult) {
@@ -1454,9 +1474,10 @@ timelines - list timelines`,
   }
 
   /** Helper: Modify a FEN string to change a square's piece and flip turn.
-   * Also updates castling rights and resets en passant for timeline consistency.
+   * Also updates castling rights, en passant, halfmove clock, and fullmove number.
+   * @param isCapture - Set to true if this modification represents a capture
    */
-  private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean): string {
+  private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean, isCapture: boolean = false): string {
     const parts = fen.split(' ');
     const rows = parts[0].split('/');
     const pos = this._fromSq(square);
@@ -1559,9 +1580,18 @@ timelines - list timelines`,
     // (The historical en passant is no longer valid since a move was made)
     parts[3] = '-';
 
-    // Reset halfmove clock if this was a capture (newPiece replaces something)
-    if (newPiece && oldPieceChar && oldPieceChar !== '') {
+    // Halfmove clock: reset on capture or pawn move, increment otherwise
+    const isPawnMove = newPiece && newPiece.type === 'p';
+    if (isCapture || isPawnMove) {
       parts[4] = '0';
+    } else {
+      // Non-capture, non-pawn move: increment halfmove clock
+      parts[4] = String(parseInt(parts[4] || '0') + 1);
+    }
+
+    // Fullmove number: increment when it becomes white's turn (after black moved)
+    if (whiteToMove) {
+      parts[5] = String(parseInt(parts[5] || '1') + 1);
     }
 
     const result = parts.join(' ');
