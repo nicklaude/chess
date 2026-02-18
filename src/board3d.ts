@@ -292,7 +292,10 @@ export class TimelineCol implements ITimelineCol {
   // These MUST be different to prevent visual overlap
   static readonly MAIN_PIECE_Y = 0.22;
   static readonly HISTORY_PIECE_Y = 0.12;
-  // Board bounds for piece position validation (8x8 board centered at origin)
+  // Board bounds for piece position validation (8x8 board centered at origin).
+  // Pieces are placed at positions col-3.5 (from -3.5 to 3.5), but we use
+  // slightly wider bounds (-4 to 4) to account for floating-point tolerance.
+  // This excludes file/rank labels which are positioned at +/-4.4.
   private static readonly BOARD_MIN = -4;
   private static readonly BOARD_MAX = 4;
 
@@ -362,13 +365,21 @@ export class TimelineCol implements ITimelineCol {
    * distinguishing them from history layer sprites and UI elements.
    *
    * Criteria:
-   * - Must be a Sprite (not a Mesh or other Object3D)
+   * - Must be a Sprite (has isSprite property)
    * - Y position within 0.01 of MAIN_PIECE_Y (tolerance for floating point)
-   * - X/Z within board bounds (excludes file/rank labels at edges)
+   * - X/Z within board bounds (excludes file/rank labels positioned at +/-4.4)
+   *
+   * @param obj - The Object3D to check
+   * @returns true if obj is a main board piece sprite, false otherwise
    */
   private _isMainBoardSprite(obj: Object3D): obj is Sprite {
+    // Guard against null/undefined
+    if (!obj) return false;
+    // Check if it's a Sprite
     if (!(obj as Sprite).isSprite) return false;
+    // Check Y position tolerance (pieces at MAIN_PIECE_Y vs history at HISTORY_PIECE_Y)
     if (Math.abs(obj.position.y - TimelineCol.MAIN_PIECE_Y) >= 0.01) return false;
+    // Check X/Z bounds (pieces from -3.5 to 3.5, labels at +/-4.4)
     const { x, z } = obj.position;
     return x >= TimelineCol.BOARD_MIN && x <= TimelineCol.BOARD_MAX &&
            z >= TimelineCol.BOARD_MIN && z <= TimelineCol.BOARD_MAX;
@@ -472,7 +483,15 @@ export class TimelineCol implements ITimelineCol {
       const child = this.group.children[i];
       if (this._isMainBoardSprite(child)) {
         this.group.remove(child);
-        (child.material as SpriteMaterial).dispose();
+        // Safely dispose material with null check and error handling
+        const material = child.material as SpriteMaterial | undefined;
+        if (material && typeof material.dispose === 'function') {
+          try {
+            material.dispose();
+          } catch (e) {
+            console.warn('[Board3D] Failed to dispose sprite material:', e);
+          }
+        }
       }
     }
 
@@ -514,8 +533,14 @@ export class TimelineCol implements ITimelineCol {
 
     for (const obj of toRemove) {
       this.group.remove(obj);
-      if ((obj as Sprite).material) {
-        ((obj as Sprite).material as SpriteMaterial).dispose();
+      // Safely dispose material with null check and error handling
+      const material = (obj as Sprite).material as SpriteMaterial | undefined;
+      if (material && typeof material.dispose === 'function') {
+        try {
+          material.dispose();
+        } catch (e) {
+          console.warn('[Board3D] Failed to dispose orphan sprite material:', e);
+        }
       }
     }
 
@@ -600,8 +625,11 @@ export class TimelineCol implements ITimelineCol {
   /**
    * Validates that no duplicate sprites exist at MAIN_PIECE_Y height.
    * If duplicates are found, logs an error with details and removes the extras.
-   * Call this after renders to catch any edge cases where sprites weren't properly cleaned up.
-   * @returns true if no duplicates were found, false if duplicates were detected and fixed
+   * This is a defensive check to catch edge cases where sprites weren't properly
+   * cleaned up during render(), which can happen due to Three.js scene graph timing.
+   *
+   * @returns true if no duplicates were found (validation passed),
+   *          false if duplicates were detected and auto-fixed
    */
   validateNoDuplicates(): boolean {
     const timestamp = Date.now();
@@ -613,8 +641,8 @@ export class TimelineCol implements ITimelineCol {
       if (this._isMainBoardSprite(child)) {
         const posKey = `${child.position.x.toFixed(2)},${child.position.z.toFixed(2)}`;
 
-        // Extract piece info from sprite texture/material if possible
-        const material = child.material as SpriteMaterial;
+        // Extract piece info from sprite texture/material for diagnostics
+        const material = child.material as SpriteMaterial | undefined;
         const pieceInfo = material?.map?.name ?? material?.name ?? 'unknown';
 
         if (!positionMap.has(posKey)) {
@@ -636,7 +664,14 @@ export class TimelineCol implements ITimelineCol {
         const z = parseFloat(zStr);
         const col = Math.round(x + 3.5);
         const row = Math.round(z + 3.5);
-        const square = String.fromCharCode(97 + col) + (8 - row);
+
+        // Validate calculated square is within valid chess board range
+        let square: string;
+        if (col >= 0 && col <= 7 && row >= 0 && row <= 7) {
+          square = String.fromCharCode(97 + col) + (8 - row);
+        } else {
+          square = `invalid(col=${col},row=${row})`;
+        }
 
         console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites detected and auto-fixed!', {
           timeline: this.id,
@@ -649,8 +684,19 @@ export class TimelineCol implements ITimelineCol {
 
         // Keep the first sprite, remove the rest
         for (let i = 1; i < sprites.length; i++) {
-          this.group.remove(sprites[i].sprite);
-          (sprites[i].sprite.material as SpriteMaterial).dispose();
+          const spriteEntry = sprites[i];
+          if (spriteEntry && spriteEntry.sprite) {
+            this.group.remove(spriteEntry.sprite);
+            // Safely dispose material with null check and error handling
+            const material = spriteEntry.sprite.material as SpriteMaterial | undefined;
+            if (material && typeof material.dispose === 'function') {
+              try {
+                material.dispose();
+              } catch (e) {
+                console.warn('[Board3D] Failed to dispose duplicate sprite material:', e);
+              }
+            }
+          }
         }
       }
     });
@@ -1190,11 +1236,14 @@ class Board3DManager implements IBoard3D {
   private _lastFpsUpdate = 0;
   private _currentFps = 0;
 
-  // Performance: pooled scratch vectors (avoid GC churn)
-  // _tempVec3A: forward direction (camera panning), offset (rotation)
-  // _tempVec3B: right direction (camera panning)
-  // _tempVec3C: movement vector (camera panning)
-  // _tempVec3D: up reference vector (camera panning - avoids crossVectors self-reference)
+  // Performance: pooled scratch vectors (avoid GC churn from frequent allocations)
+  // These are reused across frames in _updatePanning() for camera movement calculations.
+  //
+  // _tempVec3A: forward direction from camera, also reused for rotation offset
+  // _tempVec3B: right direction (perpendicular to forward in XZ plane)
+  // _tempVec3C: accumulated movement vector
+  // _tempVec3D: up reference vector (0,1,0) - MUST be separate from _tempVec3B to avoid
+  //             crossVectors() self-reference bug where output === input corrupts calculation
   private _tempVec3A = new THREE.Vector3();
   private _tempVec3B = new THREE.Vector3();
   private _tempVec3C = new THREE.Vector3();
@@ -1944,9 +1993,21 @@ class Board3DManager implements IBoard3D {
       forward.y = 0;
       forward.normalize();
 
-      // IMPORTANT: Use separate 'up' vector for crossVectors() to avoid self-reference bug.
-      // crossVectors(a, b) modifies 'this' in-place while reading from a and b.
-      // If 'this' === b, the calculation corrupts mid-computation.
+      // CRITICAL FIX: Use separate 'up' vector for crossVectors() to avoid self-reference bug.
+      //
+      // The BUGGY code was:
+      //   right.set(0, 1, 0);
+      //   right.crossVectors(forward, right).normalize();
+      //
+      // This fails because crossVectors(a, b) computes:
+      //   this.x = a.y * b.z - a.z * b.y
+      //   this.y = a.z * b.x - a.x * b.z
+      //   this.z = a.x * b.y - a.y * b.x
+      //
+      // When 'this' === 'b', the first assignment corrupts b.x before it's used
+      // in the subsequent calculations, producing incorrect results.
+      //
+      // Solution: Use a separate vector for the 'up' reference.
       const up = this._tempVec3D;
       up.set(0, 1, 0);
       const right = this._tempVec3B;
