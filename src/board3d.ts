@@ -1106,6 +1106,7 @@ class Board3DManager implements IBoard3D {
   private _tempVec3A = new THREE.Vector3();
   private _tempVec3B = new THREE.Vector3();
   private _tempVec3C = new THREE.Vector3();
+  private _tempVec3D = new THREE.Vector3();
 
   // Shared materials for squares (avoid creating 64+ materials per board)
   private _lightSquareMat: MeshStandardMaterial | null = null;
@@ -1851,9 +1852,10 @@ class Board3DManager implements IBoard3D {
       forward.y = 0;
       forward.normalize();
 
+      const up = this._tempVec3D;
+      up.set(0, 1, 0);
       const right = this._tempVec3B;
-      right.set(0, 1, 0);
-      right.crossVectors(forward, right).normalize();
+      right.crossVectors(forward, up).normalize();
 
       // Calculate movement using pooled vector
       const move = this._tempVec3C;
