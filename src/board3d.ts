@@ -318,6 +318,8 @@ interface PooledSprite extends Sprite {
 class SpritePool {
   private pool: PooledSprite[] = [];
   private maxPoolSize = 128;  // Enough for 4 boards worth of pieces
+  private static readonly WARNING_THRESHOLD = 64;  // Log when pool exceeds this
+  private _totalCreated = 0;  // Track total sprites ever created for monitoring
 
   /** Get a sprite from the pool or create a new one */
   acquire(material: SpriteMaterial): PooledSprite {
@@ -334,6 +336,13 @@ class SpritePool {
     const sprite = new THREE.Sprite(material) as PooledSprite;
     sprite._pooled = true;
     sprite.frustumCulled = true;
+    this._totalCreated++;
+
+    // Monitor: warn if we've created many sprites (potential memory leak indicator)
+    if (this._totalCreated > 0 && this._totalCreated % 100 === 0) {
+      console.warn('[SpritePool] Created', this._totalCreated, 'sprites total. Pool size:', this.pool.length);
+    }
+
     return sprite;
   }
 
@@ -354,6 +363,45 @@ class SpritePool {
         (sprite.material as SpriteMaterial).dispose();
       }
     }
+
+    // Monitor: warn if pool grows beyond expected size
+    if (this.pool.length > SpritePool.WARNING_THRESHOLD && this.pool.length % 16 === 0) {
+      console.warn('[SpritePool] Pool size exceeds threshold:', this.pool.length, '/', this.maxPoolSize);
+    }
+  }
+
+  /**
+   * Trim the pool to reduce memory usage.
+   * Destroys excess sprites if pool size exceeds the target.
+   * Call periodically (e.g., after major state changes) to prevent unbounded growth.
+   *
+   * @param targetSize - Target pool size to trim to (default: half of max)
+   */
+  trim(targetSize?: number): void {
+    const target = targetSize ?? Math.floor(this.maxPoolSize / 2);
+    let trimmed = 0;
+
+    while (this.pool.length > target) {
+      const sprite = this.pool.pop();
+      if (sprite?.material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
+      trimmed++;
+    }
+
+    if (trimmed > 0) {
+      console.log('[SpritePool] Trimmed', trimmed, 'sprites. Pool size now:', this.pool.length);
+    }
+  }
+
+  /** Get current pool size (for monitoring) */
+  size(): number {
+    return this.pool.length;
+  }
+
+  /** Get total sprites created (for monitoring memory leaks) */
+  totalCreated(): number {
+    return this._totalCreated;
   }
 
   /** Clear all pooled sprites */
@@ -617,6 +665,25 @@ export class TimelineCol implements ITimelineCol {
       const piece = position[r][c];
       if (!piece) continue;  // Safety check
 
+      // DEFENSIVE CHECK: If _spriteMap already has a sprite at this position,
+      // release it first to prevent overlaps from race conditions or edge cases
+      const existingSprite = this._spriteMap.get(posKey) as PooledSprite | undefined;
+      if (existingSprite) {
+        if (Board3DManager.DEBUG_MODE) {
+          console.warn('[Board3D] Defensive cleanup: releasing existing sprite before adding new one', {
+            timeline: this.id,
+            posKey,
+            timestamp,
+          });
+        }
+        spritePool.release(existingSprite);
+        const existingIdx = this.pieceMeshes.indexOf(existingSprite);
+        if (existingIdx !== -1) {
+          this.pieceMeshes.splice(existingIdx, 1);
+        }
+        this._spriteMap.delete(posKey);
+      }
+
       const isW = piece.color === 'w';
       const chKey = isW ? piece.type.toUpperCase() : piece.type;
       const tex = this._pieceTex(this._pieceChars[chKey], isW);
@@ -701,12 +768,17 @@ export class TimelineCol implements ITimelineCol {
    * This is a defensive check to catch edge cases where sprites weren't properly
    * cleaned up during render(), which can happen due to Three.js scene graph timing.
    *
+   * IMPORTANT: When removing duplicates, this method also syncs:
+   * - pieceMeshes array (removes duplicate entries)
+   * - _spriteMap (updates to point to the kept sprite)
+   * - Returns duplicates to spritePool for reuse
+   *
    * @returns true if no duplicates were found (validation passed),
    *          false if duplicates were detected and auto-fixed
    */
   validateNoDuplicates(): boolean {
     const timestamp = Date.now();
-    const positionMap = new Map<string, { sprite: Sprite; pieceInfo: string }[]>();
+    const positionMap = new Map<string, { sprite: Sprite; pieceInfo: string; boardPosKey: string }[]>();
 
     // First pass: collect all sprites at MAIN_PIECE_Y grouped by position
     for (let i = 0; i < this.group.children.length; i++) {
@@ -718,10 +790,15 @@ export class TimelineCol implements ITimelineCol {
         const material = child.material as SpriteMaterial | undefined;
         const pieceInfo = material?.map?.name ?? material?.name ?? 'unknown';
 
+        // Calculate board position key (row,col) for _spriteMap lookup
+        const col = Math.round(child.position.x + 3.5);
+        const row = Math.round(child.position.z + 3.5);
+        const boardPosKey = `${row},${col}`;
+
         if (!positionMap.has(posKey)) {
           positionMap.set(posKey, []);
         }
-        positionMap.get(posKey)!.push({ sprite: child, pieceInfo });
+        positionMap.get(posKey)!.push({ sprite: child, pieceInfo, boardPosKey });
       }
     }
 
@@ -755,20 +832,23 @@ export class TimelineCol implements ITimelineCol {
           pieceTypes: sprites.map(s => s.pieceInfo),
         });
 
-        // Keep the first sprite, remove the rest
+        // Keep the first sprite, update _spriteMap to point to it
+        const keptSprite = sprites[0].sprite;
+        const boardPosKey = sprites[0].boardPosKey;
+        this._spriteMap.set(boardPosKey, keptSprite);
+
+        // Remove the duplicate sprites (all but the first)
         for (let i = 1; i < sprites.length; i++) {
           const spriteEntry = sprites[i];
           if (spriteEntry && spriteEntry.sprite) {
-            this.group.remove(spriteEntry.sprite);
-            // Safely dispose material with null check and error handling
-            const material = spriteEntry.sprite.material as SpriteMaterial | undefined;
-            if (material && typeof material.dispose === 'function') {
-              try {
-                material.dispose();
-              } catch (e) {
-                console.warn('[Board3D] Failed to dispose duplicate sprite material:', e);
-              }
+            // Remove from pieceMeshes array
+            const pieceMeshIdx = this.pieceMeshes.indexOf(spriteEntry.sprite);
+            if (pieceMeshIdx !== -1) {
+              this.pieceMeshes.splice(pieceMeshIdx, 1);
             }
+
+            // Return to sprite pool (handles removal from parent and disposal)
+            spritePool.release(spriteEntry.sprite as PooledSprite);
           }
         }
       }
@@ -1386,6 +1466,11 @@ class Board3DManager implements IBoard3D {
   private _boundKeyDown: ((e: KeyboardEvent) => void) | null = null;
   private _boundKeyUp: ((e: KeyboardEvent) => void) | null = null;
   private _boundBeforeUnload: (() => void) | null = null;
+  private _boundContextLost: ((e: Event) => void) | null = null;
+  private _boundContextRestored: (() => void) | null = null;
+
+  // WebGL context loss state
+  private _webglContextLost = false;
 
   // Visual effects storage
   private _activeEffects: Array<{
@@ -1517,6 +1602,30 @@ class Board3DManager implements IBoard3D {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(this.renderer.domElement);
 
+    // WebGL context loss handling - prevents white screen crashes
+    this._boundContextLost = (event: Event) => {
+      event.preventDefault();  // Allows context to be restored
+      this._webglContextLost = true;
+      console.error('[Board3D] WebGL context lost! Render loop paused.');
+      // Show user-friendly error message
+      const overlay = document.createElement('div');
+      overlay.id = 'webgl-context-lost-overlay';
+      overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);color:white;display:flex;align-items:center;justify-content:center;font-size:18px;z-index:1000;';
+      overlay.textContent = 'WebGL context lost. Please refresh the page.';
+      this.container?.appendChild(overlay);
+    };
+    this._boundContextRestored = () => {
+      this._webglContextLost = false;
+      console.log('[Board3D] WebGL context restored.');
+      // Remove error overlay
+      const overlay = document.getElementById('webgl-context-lost-overlay');
+      overlay?.remove();
+      // Mark for render
+      this._needsRender = true;
+    };
+    this.renderer.domElement.addEventListener('webglcontextlost', this._boundContextLost);
+    this.renderer.domElement.addEventListener('webglcontextrestored', this._boundContextRestored);
+
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x080818, 0.008);
 
@@ -1580,6 +1689,9 @@ class Board3DManager implements IBoard3D {
 
     // Tab close cleanup - dispose all resources to prevent lag
     window.addEventListener('beforeunload', this._boundBeforeUnload);
+
+    // Ensure initial render happens after all setup is complete
+    this._needsRender = true;
 
     this._animate();
   }
@@ -2241,6 +2353,9 @@ class Board3DManager implements IBoard3D {
   private _animate(): void {
     requestAnimationFrame(() => this._animate());
 
+    // Skip rendering if WebGL context is lost
+    if (this._webglContextLost) return;
+
     if (!this._clock || !this.controls || !this.renderer || !this.scene || !this.camera) return;
 
     const t = this._clock.getElapsedTime();
@@ -2460,7 +2575,8 @@ class Board3DManager implements IBoard3D {
     this.controls?.target.set(0, 0, 0);
     // Clear object pools when resetting game
     meshPool.clear();
-    spritePool.clear();
+    // Trim sprite pool to reduce memory (keep some for reuse)
+    spritePool.trim(32);  // Keep ~1 board worth of pieces for quick reuse
   }
 
   /**
@@ -2566,6 +2682,15 @@ class Board3DManager implements IBoard3D {
     if (this._boundBeforeUnload) {
       window.removeEventListener('beforeunload', this._boundBeforeUnload);
     }
+    // Remove WebGL context loss handlers
+    if (this.renderer?.domElement) {
+      if (this._boundContextLost) {
+        this.renderer.domElement.removeEventListener('webglcontextlost', this._boundContextLost);
+      }
+      if (this._boundContextRestored) {
+        this.renderer.domElement.removeEventListener('webglcontextrestored', this._boundContextRestored);
+      }
+    }
     // Canvas event listeners - removed when canvas is removed from DOM
     // No need to explicitly remove if renderer.domElement is removed
 
@@ -2575,6 +2700,8 @@ class Board3DManager implements IBoard3D {
     this._boundKeyDown = null;
     this._boundKeyUp = null;
     this._boundBeforeUnload = null;
+    this._boundContextLost = null;
+    this._boundContextRestored = null;
 
     // Dispose renderer
     if (this.renderer) {
