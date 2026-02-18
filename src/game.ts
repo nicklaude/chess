@@ -1493,6 +1493,9 @@ timelines - list timelines`,
       isWhite,
     });
 
+    // Validate snapshot consistency on the new timeline (same as branching code)
+    this._validateSnapshotConsistency(newTl);
+
     // Add history layers to the new timeline visual
     const newCol = Board3D.getTimeline(newId);
     if (newCol) {

@@ -288,6 +288,10 @@ const meshPool = new MeshPool();
 export class TimelineCol implements ITimelineCol {
   static readonly LAYER_GAP = 2.8;
   static readonly MAX_LAYERS = 12;
+  // Y positions for pieces - main board at 0.22, history at 0.12
+  // These MUST be different to prevent visual overlap
+  static readonly MAIN_PIECE_Y = 0.22;
+  static readonly HISTORY_PIECE_Y = 0.12;
 
   private scene: Scene;
   private shared: SharedResources;
@@ -441,16 +445,29 @@ export class TimelineCol implements ITimelineCol {
 
     // Also do a safety check - remove any orphaned sprites from the group
     // This catches edge cases where sprites weren't properly tracked
+    // IMPORTANT: Only check direct children of this.group, not history layer sprites
     const toRemove: Object3D[] = [];
     this.group.traverse((child: Object3D) => {
-      if ((child as Sprite).isSprite && child !== this.group) {
-        // Check if this sprite is at piece height (y = 0.22) - those are board pieces
-        if (Math.abs(child.position.y - 0.22) < 0.01) {
+      if ((child as Sprite).isSprite) {
+        // Check if this sprite is at MAIN board piece height (y = MAIN_PIECE_Y)
+        // History sprites are at HISTORY_PIECE_Y (0.12) so won't be caught
+        if (Math.abs(child.position.y - TimelineCol.MAIN_PIECE_Y) < 0.01) {
           // Check if this sprite is NOT in our text labels (file/rank labels at edges)
           const x = child.position.x;
           const z = child.position.z;
           if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
-            toRemove.push(child);
+            // Additional check: ensure this is a direct child of this.group, not inside a history layer
+            if (child.parent === this.group) {
+              toRemove.push(child);
+            } else {
+              // This should NEVER happen - a sprite at MAIN_PIECE_Y inside a nested group
+              console.error('[Board3D] PIECE_OVERLAP_BUG: Main piece sprite found in nested group!', {
+                timeline: this.id,
+                timestamp,
+                spritePos: { x: x.toFixed(2), y: child.position.y.toFixed(2), z: z.toFixed(2) },
+                parentType: child.parent?.type,
+              });
+            }
           }
         }
       }
@@ -490,7 +507,7 @@ export class TimelineCol implements ITimelineCol {
         const sprite = new THREE.Sprite(
           new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
         );
-        sprite.position.set(c - 3.5, 0.22, r - 3.5);
+        sprite.position.set(c - 3.5, TimelineCol.MAIN_PIECE_Y, r - 3.5);
         sprite.scale.set(0.88, 0.88, 0.88);
         sprite.frustumCulled = true;
         this.pieceMeshes.push(sprite);
@@ -510,15 +527,38 @@ export class TimelineCol implements ITimelineCol {
 
     // Final validation: scan group for any sprites at piece height
     let spritesAtPieceHeight = 0;
+    const spritePositions: Map<string, number> = new Map();
+
     this.group.traverse((child: Object3D) => {
-      if ((child as Sprite).isSprite && Math.abs(child.position.y - 0.22) < 0.01) {
+      if ((child as Sprite).isSprite && Math.abs(child.position.y - TimelineCol.MAIN_PIECE_Y) < 0.01) {
         const x = child.position.x;
         const z = child.position.z;
         if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
           spritesAtPieceHeight++;
+          // Track sprite positions to detect duplicates
+          const posKey = `${x.toFixed(2)},${z.toFixed(2)}`;
+          spritePositions.set(posKey, (spritePositions.get(posKey) || 0) + 1);
         }
       }
     });
+
+    // Check for any duplicate positions (two sprites at the same x,z)
+    const duplicates: string[] = [];
+    spritePositions.forEach((count, pos) => {
+      if (count > 1) {
+        duplicates.push(`${pos} (${count} sprites)`);
+      }
+    });
+
+    if (duplicates.length > 0) {
+      console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites at same position!', {
+        timeline: this.id,
+        timestamp,
+        duplicates,
+        totalSprites: spritesAtPieceHeight,
+      });
+    }
+
     if (spritesAtPieceHeight !== newPieceCount) {
       console.error('[Board3D] VISUAL_TRAILS_BUG: Post-render sprite mismatch!', {
         timeline: this.id,
@@ -645,7 +685,7 @@ export class TimelineCol implements ITimelineCol {
       this.shared.portalRingMat!
     );
     outerRing.rotation.x = -Math.PI / 2;
-    outerRing.position.set(pos.c - 3.5, 0.12, pos.r - 3.5);
+    outerRing.position.set(pos.c - 3.5, TimelineCol.HISTORY_PIECE_Y, pos.r - 3.5);
     layer.add(outerRing);
     this.timeTravelTargets.push(outerRing);
 
@@ -730,6 +770,40 @@ export class TimelineCol implements ITimelineCol {
       this.group.remove(old);
     }
     this._layoutLayers();
+
+    // VALIDATION: Ensure all history layer sprites are positioned below the main board
+    // History piece sprites are at local Y=HISTORY_PIECE_Y, and the group should be at negative Y
+    // So world Y of any history sprite should be negative
+    for (let i = 0; i < this.historyLayers.length; i++) {
+      const layer = this.historyLayers[i];
+      const groupY = layer.position.y;
+      const expectedMinY = -(i + 1) * TimelineCol.LAYER_GAP;
+
+      if (Math.abs(groupY - expectedMinY) > 0.001) {
+        console.error('[Board3D] PIECE_OVERLAP_BUG: History layer at wrong Y position!', {
+          layerIndex: i,
+          actualY: groupY,
+          expectedY: expectedMinY,
+          timelineId: this.id,
+        });
+      }
+
+      // Check that all sprites in this layer have negative world Y
+      layer.traverse((child: Object3D) => {
+        if ((child as Sprite).isSprite) {
+          const worldY = groupY + child.position.y;
+          if (worldY >= 0) {
+            console.error('[Board3D] PIECE_OVERLAP_BUG: History sprite at non-negative world Y!', {
+              layerIndex: i,
+              groupY,
+              localY: child.position.y,
+              worldY,
+              timelineId: this.id,
+            });
+          }
+        }
+      });
+    }
   }
 
   private _makeHistoryBoard(position: Board): Group {
@@ -787,7 +861,7 @@ export class TimelineCol implements ITimelineCol {
         const sp = new THREE.Sprite(
           new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.25, depthWrite: false })
         );
-        sp.position.set(c2 - 3.5, 0.12, r2 - 3.5);
+        sp.position.set(c2 - 3.5, TimelineCol.HISTORY_PIECE_Y, r2 - 3.5);
         sp.scale.set(0.7, 0.7, 0.7);
         sp.frustumCulled = true;
         g.add(sp);
@@ -821,7 +895,17 @@ export class TimelineCol implements ITimelineCol {
 
   private _layoutLayers(): void {
     for (let i = 0; i < this.historyLayers.length; i++) {
-      this.historyLayers[i].position.y = -(i + 1) * TimelineCol.LAYER_GAP;
+      const targetY = -(i + 1) * TimelineCol.LAYER_GAP;
+      this.historyLayers[i].position.y = targetY;
+
+      // VALIDATION: Ensure history layers are always below the main board
+      if (targetY >= 0) {
+        console.error('[Board3D] PIECE_OVERLAP_BUG: History layer at non-negative Y!', {
+          layerIndex: i,
+          targetY,
+          timelineId: this.id,
+        });
+      }
 
       // Calculate snapshot index for this layer (most recent history is layer 0)
       // historyLayers[0] corresponds to the most recent snapshot before current
