@@ -1211,8 +1211,41 @@ timelines - list timelines`,
     const targetTl = this.timelines[targetTimelineId];
     if (!sourceTl || !targetTl) return;
 
+    // RACE CONDITION CHECK: Re-validate move count synchronization
+    // Cross-timeline moves require both timelines to have the same move count
+    if (sourceTl.moveHistory.length !== targetTl.moveHistory.length) {
+      console.error('[Cross-Timeline] RACE CONDITION DETECTED: Move count mismatch!', {
+        sourceTimelineId,
+        sourceMoves: sourceTl.moveHistory.length,
+        targetTimelineId,
+        targetMoves: targetTl.moveHistory.length,
+      });
+      return;
+    }
+
+    // RACE CONDITION CHECK: Re-validate turn synchronization
+    // Both timelines must be on the same color's turn
+    if (sourceTl.chess.turn() !== targetTl.chess.turn()) {
+      console.error('[Cross-Timeline] RACE CONDITION DETECTED: Turn mismatch!', {
+        sourceTimelineId,
+        sourceTurn: sourceTl.chess.turn(),
+        targetTimelineId,
+        targetTurn: targetTl.chess.turn(),
+      });
+      return;
+    }
+
     const isWhite = piece.color === 'w';
     const targetPiece = targetTl.chess.get(square);
+
+    // RACE CONDITION CHECK: Validate it's this piece's color's turn
+    if ((isWhite && sourceTl.chess.turn() !== 'w') || (!isWhite && sourceTl.chess.turn() !== 'b')) {
+      console.error('[Cross-Timeline] RACE CONDITION DETECTED: Not this color turn!', {
+        pieceColor: piece.color,
+        currentTurn: sourceTl.chess.turn(),
+      });
+      return;
+    }
 
     // TURN DEBUG: Log cross-timeline move entry
     console.log('[TURN_DEBUG] makeCrossTimelineMove ENTRY:', {
@@ -1448,6 +1481,17 @@ timelines - list timelines`,
   ): void {
     const sourceTl = this.timelines[sourceTimelineId];
     if (!sourceTl) return;
+
+    // RACE CONDITION CHECK: Validate it's this piece's color's turn
+    const isWhiteMoving = piece.color === 'w';
+    if ((isWhiteMoving && sourceTl.chess.turn() !== 'w') || (!isWhiteMoving && sourceTl.chess.turn() !== 'b')) {
+      console.error('[Time Travel] RACE CONDITION DETECTED: Not this color turn!', {
+        pieceColor: piece.color,
+        currentTurn: sourceTl.chess.turn(),
+        sourceTimelineId,
+      });
+      return;
+    }
 
     // TURN DEBUG: Log time travel move entry
     console.log('[TURN_DEBUG] _makeTimeTravelMove ENTRY:', {
@@ -2456,6 +2500,9 @@ timelines - list timelines`,
   private cpuCameraFollow = true;  // Auto-follow moves with camera
   private cpuGlobalTurn: PieceColor = 'w';  // Track whose turn globally (independent of per-timeline state)
 
+  // Race condition prevention: lock to prevent concurrent move execution
+  private cpuMoveInProgress = false;
+
   // Per-color CPU settings
   private cpuWhiteEnabled = true;
   private cpuBlackEnabled = true;
@@ -2477,6 +2524,7 @@ timelines - list timelines`,
     }
 
     this.cpuEnabled = true;
+    this.cpuMoveInProgress = false;  // Ensure clean state on start
     this._cpuTick();
     this._updateCpuUI();
   }
@@ -2484,6 +2532,7 @@ timelines - list timelines`,
   /** Stop CPU auto-play mode */
   cpuStop(): void {
     this.cpuEnabled = false;
+    this.cpuMoveInProgress = false;  // Clear any pending move lock
     if (this.cpuTimer !== null) {
       clearTimeout(this.cpuTimer);
       this.cpuTimer = null;
@@ -2542,6 +2591,14 @@ timelines - list timelines`,
   private _cpuTick(): void {
     if (!this.cpuEnabled) return;
 
+    // RACE CONDITION PREVENTION: If a move is already in progress, skip this tick
+    // This prevents overlapping move execution when setTimeout callbacks fire during long operations
+    if (this.cpuMoveInProgress) {
+      console.log('[CPU] Move in progress, skipping tick');
+      this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
+      return;
+    }
+
     // Check if ALL timelines are finished (checkmate or stalemate)
     // If so, stop CPU to avoid spinning forever
     if (this._cpuIsGameOver()) {
@@ -2571,13 +2628,21 @@ timelines - list timelines`,
       return;
     }
 
-    // Make a move on ONE random playable timeline (to keep pace reasonable)
-    const tlId = playableTimelines[Math.floor(Math.random() * playableTimelines.length)];
-    const moved = this._cpuMakeMove(tlId);
+    // RACE CONDITION PREVENTION: Acquire lock before making move
+    this.cpuMoveInProgress = true;
 
-    if (moved) {
-      // After successful move, flip global turn
-      this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
+    try {
+      // Make a move on ONE random playable timeline (to keep pace reasonable)
+      const tlId = playableTimelines[Math.floor(Math.random() * playableTimelines.length)];
+      const moved = this._cpuMakeMove(tlId);
+
+      if (moved) {
+        // After successful move, flip global turn
+        this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
+      }
+    } finally {
+      // RACE CONDITION PREVENTION: Release lock after move completes
+      this.cpuMoveInProgress = false;
     }
 
     // Schedule next tick
@@ -2618,6 +2683,17 @@ timelines - list timelines`,
   private _cpuMakeMove(tlId: number): boolean {
     const tl = this.timelines[tlId];
     if (!tl) return false;
+
+    // RACE CONDITION CHECK: Verify this timeline's turn matches global turn
+    // This catches edge cases where state changed between selection and execution
+    if (tl.chess.turn() !== this.cpuGlobalTurn) {
+      console.error('[CPU] RACE CONDITION DETECTED: Turn mismatch!', {
+        timelineId: tlId,
+        timelineTurn: tl.chess.turn(),
+        globalTurn: this.cpuGlobalTurn,
+      });
+      return false;
+    }
 
     // Double-check: refuse to move if in checkmate or stalemate
     if (tl.chess.in_checkmate() || tl.chess.in_stalemate()) {
