@@ -1685,15 +1685,15 @@ class Board3DManager implements IBoard3D {
       ctx.lineWidth = 1.5;
       ctx.strokeText(symbol, s / 2, s / 2);
     } else {
-      // Black pieces: solid dark fill with subtle dark outline
-      // Use a purplish-black that's clearly distinct from white
-      ctx.shadowColor = 'rgba(20,10,40,0.8)';
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = '#252035';  // Dark purple-black
+      // Black pieces: same outline style as white but with dark fill and visible lighter outline
+      // Makes black pieces clearly readable against the dark board
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = '#1a1a2e';  // Dark navy fill
       ctx.fillText(symbol, s / 2, s / 2);
       ctx.shadowBlur = 0;
-      // Dark outline (not white/bright)
-      ctx.strokeStyle = '#151020';
+      // Lighter outline so piece shape is clearly visible (matching white's stroke approach)
+      ctx.strokeStyle = '#b0b0c8';
       ctx.lineWidth = 2;
       ctx.strokeText(symbol, s / 2, s / 2);
     }
@@ -1732,12 +1732,18 @@ class Board3DManager implements IBoard3D {
     let curve: Curve<Vector3>;
     if (arc) {
       const mid = new THREE.Vector3().lerpVectors(from, to, 0.5);
-      const hDir = new THREE.Vector2(mid.x, mid.z);
+      // Lift the arc above boards so it doesn't clip through them
+      const dist = from.distanceTo(to);
+      const yLift = Math.max(1.5, dist * 0.25);
+      mid.y = Math.max(from.y, to.y) + yLift;
+      // Slight horizontal offset for visual separation
+      const hDir = new THREE.Vector2(to.x - from.x, to.z - from.z);
       const hLen = hDir.length();
       if (hLen > 0.01) {
         hDir.normalize();
-        mid.x += hDir.x * 0.7;
-        mid.z += hDir.y * 0.7;
+        // Perpendicular nudge so parallel lines don't overlap
+        mid.x += -hDir.y * 0.5;
+        mid.z += hDir.x * 0.5;
       }
       curve = new THREE.QuadraticBezierCurve3(from, mid, to);
     } else {
@@ -1753,7 +1759,7 @@ class Board3DManager implements IBoard3D {
           transparent: true,
           opacity: 0.1 * opacityScale,
           blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
+          side: THREE.BackSide,
           depthWrite: false,
         })
       )
@@ -1766,7 +1772,7 @@ class Board3DManager implements IBoard3D {
           transparent: true,
           opacity: 0.22 * opacityScale,
           blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
+          side: THREE.BackSide,
           depthWrite: false,
         })
       )
