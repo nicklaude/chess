@@ -82,6 +82,11 @@ class SharedResources {
   portalGlowCaptureMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
   portalCaptureRingMat: InstanceType<typeof THREE.MeshBasicMaterial> | null = null;
 
+  // Shared history square materials - use clones for per-layer opacity
+  // PERFORMANCE: 2 base materials instead of 64+ per layer (768+ for 12 layers)
+  historySquareLightMat: MeshStandardMaterial | null = null;
+  historySquareDarkMat: MeshStandardMaterial | null = null;
+
   static getInstance(): SharedResources {
     if (!SharedResources._instance) {
       SharedResources._instance = new SharedResources();
@@ -131,6 +136,24 @@ class SharedResources {
       metalness: 0.5,
       roughness: 0.5,
     });
+
+    // History square materials - shared base materials for cloning
+    // Using clone() allows per-layer opacity while sharing the base material properties
+    this.historySquareLightMat = new THREE.MeshStandardMaterial({
+      color: 0x5a5a88,  // Darker colors for history squares
+      transparent: true,
+      opacity: 0.15,
+      metalness: 0.15,
+      roughness: 0.8,
+    });
+    this.historySquareDarkMat = new THREE.MeshStandardMaterial({
+      color: 0x38385a,
+      transparent: true,
+      opacity: 0.15,
+      metalness: 0.15,
+      roughness: 0.8,
+    });
+
     this.moveIndicatorMat = new THREE.MeshBasicMaterial({
       color: 0xffdd44,
       transparent: true,
@@ -207,6 +230,8 @@ class SharedResources {
     this.boardBaseMat?.dispose();
     this.boardTrimMat?.dispose();
     this.historyBaseMat?.dispose();
+    this.historySquareLightMat?.dispose();
+    this.historySquareDarkMat?.dispose();
     this.moveIndicatorMat?.dispose();
     this.lastMoveHighlightMat?.dispose();
     this.crossTimelineRingMat?.dispose();
@@ -282,6 +307,70 @@ class MeshPool {
 const meshPool = new MeshPool();
 
 // ===============================================================
+// SpritePool - object pooling for piece sprites
+// Reduces GC pressure from destroying/creating 32 sprites per move
+// ===============================================================
+
+interface PooledSprite extends Sprite {
+  _pooled?: boolean;
+}
+
+class SpritePool {
+  private pool: PooledSprite[] = [];
+  private maxPoolSize = 128;  // Enough for 4 boards worth of pieces
+
+  /** Get a sprite from the pool or create a new one */
+  acquire(material: SpriteMaterial): PooledSprite {
+    if (this.pool.length > 0) {
+      const sprite = this.pool.pop()!;
+      sprite.visible = true;
+      // Update material - dispose old one and assign new
+      if (sprite.material && sprite.material !== material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
+      sprite.material = material;
+      return sprite;
+    }
+    const sprite = new THREE.Sprite(material) as PooledSprite;
+    sprite._pooled = true;
+    sprite.frustumCulled = true;
+    return sprite;
+  }
+
+  /** Return a sprite to the pool */
+  release(sprite: PooledSprite): void {
+    if (!sprite._pooled) return;
+
+    if (sprite.parent) {
+      sprite.parent.remove(sprite);
+    }
+    sprite.visible = false;
+
+    if (this.pool.length < this.maxPoolSize) {
+      this.pool.push(sprite);
+    } else {
+      // Pool is full - dispose this sprite
+      if (sprite.material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
+    }
+  }
+
+  /** Clear all pooled sprites */
+  clear(): void {
+    for (const sprite of this.pool) {
+      if (sprite.material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
+    }
+    this.pool = [];
+  }
+}
+
+// Global sprite pool instance
+const spritePool = new SpritePool();
+
+// ===============================================================
 // TimelineCol - one per timeline
 // ===============================================================
 
@@ -320,6 +409,12 @@ export class TimelineCol implements ITimelineCol {
   private crossTimelineTargets: Mesh[] = [];  // Purple highlights for cross-timeline moves
   private timeTravelTargets: Mesh[] = [];     // Cyan-green portals for time travel moves
   private drawnBranchIndices: Set<number> = new Set();  // Track which snapshot indices have branches drawn
+
+  // Performance: track previous board state for diff-based rendering
+  // Store as map of "row,col" -> "type,color" to detect what changed
+  private _prevBoardState: Map<string, string> = new Map();
+  // Map sprite position key to the sprite at that position for efficient updates
+  private _spriteMap: Map<string, Sprite> = new Map();
 
   constructor(
     scene: Scene,
@@ -457,168 +552,146 @@ export class TimelineCol implements ITimelineCol {
     }
   }
 
-  /* render pieces on current board */
+  /* render pieces on current board - OPTIMIZED with diff-based updates and sprite pooling */
   render(position: Board): void {
-    const prevCount = this.pieceMeshes.length;
     const timestamp = Date.now();
 
-    // Remove and dispose of old piece sprites to prevent stacking and memory leaks
-    // Use reverse iteration to safely remove during iteration
-    for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
-      const sprite = this.pieceMeshes[i];
-      this.group.remove(sprite);
-      // Dispose of the sprite material to prevent memory leaks
-      // Note: We don't dispose of the texture since it's cached and shared
-      if (sprite.material) {
-        (sprite.material as SpriteMaterial).dispose();
-      }
-    }
-    this.pieceMeshes.length = 0;  // Clear array in place
-
-    // CRITICAL FIX for piece overlap bug:
-    // Three.js group.remove() may not immediately update the scene graph, and traverse()
-    // may still see stale sprites. Use direct children iteration for immediate cleanup.
-    // Iterate backwards to safely remove during iteration.
-    for (let i = this.group.children.length - 1; i >= 0; i--) {
-      const child = this.group.children[i];
-      if (this._isMainBoardSprite(child)) {
-        this.group.remove(child);
-        // Safely dispose material with null check and error handling
-        const material = child.material as SpriteMaterial | undefined;
-        if (material && typeof material.dispose === 'function') {
-          try {
-            material.dispose();
-          } catch (e) {
-            console.warn('[Board3D] Failed to dispose sprite material:', e);
-          }
-        }
-      }
-    }
-
-    // Secondary safety check using traverse() - catches sprites in nested groups
-    // This should rarely find anything but provides defense in depth
-    const toRemove: Object3D[] = [];
-    this.group.traverse((child: Object3D) => {
-      if (this._isMainBoardSprite(child)) {
-        // Skip if this is the group itself or already removed
-        if (child.parent === this.group) {
-          toRemove.push(child);
-        } else if (child.parent && child.parent !== this.group) {
-          // This should NEVER happen - a sprite at MAIN_PIECE_Y inside a nested group
-          console.error('[Board3D] PIECE_OVERLAP_BUG: Main piece sprite found in nested group!', {
-            timeline: this.id,
-            timestamp,
-            spritePos: {
-              x: child.position.x.toFixed(2),
-              y: child.position.y.toFixed(2),
-              z: child.position.z.toFixed(2)
-            },
-            parentType: child.parent?.type,
-          });
-        }
-      }
-    });
-
-    // Log if we found orphaned sprites after direct children cleanup - indicates a deeper bug
-    if (toRemove.length > 0) {
-      console.warn('[Board3D] PIECE_OVERLAP_BUG: Found', toRemove.length, 'orphaned sprites after direct cleanup on timeline', this.id, {
-        timestamp,
-        orphanPositions: toRemove.map(obj => ({
-          x: obj.position.x.toFixed(2),
-          y: obj.position.y.toFixed(2),
-          z: obj.position.z.toFixed(2),
-        })),
-      });
-    }
-
-    for (const obj of toRemove) {
-      this.group.remove(obj);
-      // Safely dispose material with null check and error handling
-      const material = (obj as Sprite).material as SpriteMaterial | undefined;
-      if (material && typeof material.dispose === 'function') {
-        try {
-          material.dispose();
-        } catch (e) {
-          console.warn('[Board3D] Failed to dispose orphan sprite material:', e);
-        }
-      }
-    }
-
-    // Count pieces in the new position
-    let newPieceCount = 0;
-
-    // Now add fresh piece sprites
+    // Build new board state map for comparison
+    const newBoardState = new Map<string, string>();
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const piece = position[r][c];
-        if (!piece) continue;
-        newPieceCount++;
-        const isW = piece.color === 'w';
-        const chKey = isW ? piece.type.toUpperCase() : piece.type;
-        const tex = this._pieceTex(this._pieceChars[chKey], isW);
-        const sprite = new THREE.Sprite(
-          new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
-        );
-        sprite.position.set(c - 3.5, TimelineCol.MAIN_PIECE_Y, r - 3.5);
-        sprite.scale.set(0.88, 0.88, 0.88);
-        sprite.frustumCulled = true;
-        this.pieceMeshes.push(sprite);
-        this.group.add(sprite);
-      }
-    }
-
-    // Verify sprite count matches piece count
-    if (this.pieceMeshes.length !== newPieceCount) {
-      console.error('[Board3D] VISUAL_TRAILS_BUG: Sprite count mismatch!', {
-        timeline: this.id,
-        timestamp,
-        expected: newPieceCount,
-        actual: this.pieceMeshes.length,
-      });
-    }
-
-    // Final validation: scan group for any sprites at piece height
-    let spritesAtPieceHeight = 0;
-    const spritePositions: Map<string, number> = new Map();
-
-    this.group.traverse((child: Object3D) => {
-      if ((child as Sprite).isSprite && Math.abs(child.position.y - TimelineCol.MAIN_PIECE_Y) < 0.01) {
-        const x = child.position.x;
-        const z = child.position.z;
-        if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
-          spritesAtPieceHeight++;
-          // Track sprite positions to detect duplicates
-          const posKey = `${x.toFixed(2)},${z.toFixed(2)}`;
-          spritePositions.set(posKey, (spritePositions.get(posKey) || 0) + 1);
+        if (piece) {
+          const posKey = `${r},${c}`;
+          const pieceKey = `${piece.type},${piece.color}`;
+          newBoardState.set(posKey, pieceKey);
         }
       }
-    });
+    }
 
-    // Check for any duplicate positions (two sprites at the same x,z)
-    const duplicates: string[] = [];
-    spritePositions.forEach((count, pos) => {
-      if (count > 1) {
-        duplicates.push(`${pos} (${count} sprites)`);
+    // Find what changed: removed, added, and unchanged positions
+    const toRemove: string[] = [];
+    const toAdd: string[] = [];
+
+    // Check old positions - what was removed or changed
+    this._prevBoardState.forEach((pieceKey, posKey) => {
+      const newPieceKey = newBoardState.get(posKey);
+      if (!newPieceKey || newPieceKey !== pieceKey) {
+        toRemove.push(posKey);
       }
     });
 
-    if (duplicates.length > 0) {
-      console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites at same position!', {
-        timeline: this.id,
-        timestamp,
-        duplicates,
-        totalSprites: spritesAtPieceHeight,
-      });
+    // Check new positions - what was added or changed
+    newBoardState.forEach((pieceKey, posKey) => {
+      const oldPieceKey = this._prevBoardState.get(posKey);
+      if (!oldPieceKey || oldPieceKey !== pieceKey) {
+        toAdd.push(posKey);
+      }
+    });
+
+    // PERFORMANCE: Skip if nothing changed
+    if (toRemove.length === 0 && toAdd.length === 0 && this._prevBoardState.size === newBoardState.size) {
+      return;
     }
 
-    if (spritesAtPieceHeight !== newPieceCount) {
-      console.error('[Board3D] VISUAL_TRAILS_BUG: Post-render sprite mismatch!', {
-        timeline: this.id,
-        timestamp,
-        expectedPieces: newPieceCount,
-        spritesInGroup: spritesAtPieceHeight,
-        trackedSprites: this.pieceMeshes.length,
+    // Remove sprites for positions that changed or are now empty
+    for (const posKey of toRemove) {
+      const sprite = this._spriteMap.get(posKey) as PooledSprite | undefined;
+      if (sprite) {
+        // Return to pool for reuse
+        spritePool.release(sprite);
+        this._spriteMap.delete(posKey);
+        // Remove from pieceMeshes array
+        const idx = this.pieceMeshes.indexOf(sprite);
+        if (idx !== -1) {
+          this.pieceMeshes.splice(idx, 1);
+        }
+      }
+    }
+
+    // Add sprites for positions that are new or changed
+    for (const posKey of toAdd) {
+      const [rStr, cStr] = posKey.split(',');
+      const r = parseInt(rStr);
+      const c = parseInt(cStr);
+      const piece = position[r][c];
+      if (!piece) continue;  // Safety check
+
+      const isW = piece.color === 'w';
+      const chKey = isW ? piece.type.toUpperCase() : piece.type;
+      const tex = this._pieceTex(this._pieceChars[chKey], isW);
+      const material = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+
+      // Get sprite from pool (or create new one)
+      const sprite = spritePool.acquire(material);
+      sprite.position.set(c - 3.5, TimelineCol.MAIN_PIECE_Y, r - 3.5);
+      sprite.scale.set(0.88, 0.88, 0.88);
+      this.group.add(sprite);
+      this.pieceMeshes.push(sprite);
+      this._spriteMap.set(posKey, sprite);
+    }
+
+    // Update stored state for next render
+    this._prevBoardState = newBoardState;
+
+    // SAFETY: Clean up any orphaned sprites not in our map (in case of bugs)
+    // This handles edge cases like rapid state changes
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if (this._isMainBoardSprite(child)) {
+        // Check if this sprite is in our map
+        let found = false;
+        this._spriteMap.forEach((sprite) => {
+          if (sprite === child) found = true;
+        });
+        if (!found) {
+          this.group.remove(child);
+          spritePool.release(child as PooledSprite);
+        }
+      }
+    }
+
+    // DEBUG: Validation checks
+    if (Board3DManager.DEBUG_MODE) {
+      const expectedCount = newBoardState.size;
+      if (this.pieceMeshes.length !== expectedCount) {
+        console.error('[Board3D] VISUAL_TRAILS_BUG: Sprite count mismatch!', {
+          timeline: this.id,
+          timestamp,
+          expected: expectedCount,
+          actual: this.pieceMeshes.length,
+          removed: toRemove.length,
+          added: toAdd.length,
+        });
+      }
+
+      // Check for duplicates
+      let spritesAtPieceHeight = 0;
+      const spritePositions: Map<string, number> = new Map();
+      this.group.traverse((child: Object3D) => {
+        if ((child as Sprite).isSprite && Math.abs(child.position.y - TimelineCol.MAIN_PIECE_Y) < 0.01) {
+          const x = child.position.x;
+          const z = child.position.z;
+          if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
+            spritesAtPieceHeight++;
+            const posKey = `${x.toFixed(2)},${z.toFixed(2)}`;
+            spritePositions.set(posKey, (spritePositions.get(posKey) || 0) + 1);
+          }
+        }
       });
+
+      const duplicates: string[] = [];
+      spritePositions.forEach((count, pos) => {
+        if (count > 1) duplicates.push(`${pos} (${count} sprites)`);
+      });
+
+      if (duplicates.length > 0) {
+        console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites detected!', {
+          timeline: this.id,
+          timestamp,
+          duplicates,
+        });
+      }
     }
   }
 
@@ -954,19 +1027,23 @@ export class TimelineCol implements ITimelineCol {
     base.frustumCulled = true;
     g.add(base);
 
-    // History squares - use shared geometry, per-instance materials for opacity control
+    // PERFORMANCE OPTIMIZATION: Create just 2 materials per layer (light/dark)
+    // instead of 64 materials per layer. All squares in a layer share the same opacity,
+    // so they can share materials. This reduces material count from 768 to 24 for 12 layers.
+    const layerLightMat = this.shared.historySquareLightMat!.clone();
+    const layerDarkMat = this.shared.historySquareDarkMat!.clone();
+
+    // Store materials on group for later disposal and opacity updates
+    g.userData.lightMat = layerLightMat;
+    g.userData.darkMat = layerDarkMat;
+
+    // History squares - use shared geometry, per-LAYER materials for opacity control
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const isLight = (r + c) % 2 === 0;
         const m = new THREE.Mesh(
           this.shared.historySquareGeometry!,
-          new THREE.MeshStandardMaterial({
-            color: isLight ? 0x5a5a88 : 0x38385a,  // Darker colors for history squares
-            transparent: true,
-            opacity: 0.15,
-            metalness: 0.15,
-            roughness: 0.8,
-          })
+          isLight ? layerLightMat : layerDarkMat
         );
         m.position.set(c - 3.5, 0, r - 3.5);
         m.frustumCulled = true;
@@ -1011,18 +1088,17 @@ export class TimelineCol implements ITimelineCol {
     const toRemove = (layerGroup.userData.sqMeshes as Mesh[]) || [];
     this.historySquareMeshes = this.historySquareMeshes.filter((m) => toRemove.indexOf(m) === -1);
 
-    // Dispose of all sprites and materials in the layer to prevent memory leaks
+    // Dispose the per-layer shared materials (just 2 per layer now)
+    const lightMat = layerGroup.userData.lightMat as MeshStandardMaterial | undefined;
+    const darkMat = layerGroup.userData.darkMat as MeshStandardMaterial | undefined;
+    lightMat?.dispose();
+    darkMat?.dispose();
+
+    // Dispose of all sprites in the layer to prevent memory leaks
     layerGroup.traverse((child: Object3D) => {
-      const obj = child as Mesh | Sprite;
-      if ((obj as Sprite).isSprite && obj.material) {
+      const obj = child as Sprite;
+      if (obj.isSprite && obj.material) {
         (obj.material as SpriteMaterial).dispose();
-      }
-      // Dispose per-instance materials for history squares
-      if ((obj as Mesh).isMesh && obj.material && obj !== layerGroup.children[0]) {
-        // Don't dispose shared materials
-        if ((obj.material as MeshStandardMaterial).opacity !== undefined) {
-          (obj.material as Material).dispose();
-        }
       }
     });
   }
@@ -1090,12 +1166,18 @@ export class TimelineCol implements ITimelineCol {
   }
 
   private _setGroupOpacity(group: Group, opacity: number): void {
+    // PERFORMANCE: Update per-layer shared materials directly instead of traversing all children
+    // With shared materials, we only need to set opacity on 2 materials per layer
+    const lightMat = group.userData.lightMat as MeshStandardMaterial | undefined;
+    const darkMat = group.userData.darkMat as MeshStandardMaterial | undefined;
+    if (lightMat) lightMat.opacity = opacity;
+    if (darkMat) darkMat.opacity = opacity;
+
+    // Also update sprite opacity (history piece sprites still need traversal)
     group.traverse((child: Object3D) => {
-      const obj = child as Mesh | Sprite;
-      if (obj.material && (obj.material as Material).transparent) {
-        (obj.material as Material).opacity = (child as Sprite).isSprite
-          ? opacity * 1.1
-          : opacity;
+      const obj = child as Sprite;
+      if (obj.isSprite && obj.material && (obj.material as Material).transparent) {
+        (obj.material as Material).opacity = opacity * 1.1;
       }
     });
   }
@@ -1161,15 +1243,16 @@ export class TimelineCol implements ITimelineCol {
   }
 
   clearAll(): void {
-    // Clear and dispose of piece sprites to prevent stacking
+    // Clear and return piece sprites to pool for reuse
     for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
-      const sprite = this.pieceMeshes[i];
-      this.group.remove(sprite);
-      if (sprite.material) {
-        (sprite.material as SpriteMaterial).dispose();
-      }
+      const sprite = this.pieceMeshes[i] as PooledSprite;
+      spritePool.release(sprite);
     }
     this.pieceMeshes.length = 0;
+
+    // Clear diff-based rendering state
+    this._prevBoardState.clear();
+    this._spriteMap.clear();
 
     // Clear history layers and dispose of their contents
     for (let i = 0; i < this.historyLayers.length; i++) {
@@ -1236,6 +1319,17 @@ class Board3DManager implements IBoard3D {
   private _lastFpsUpdate = 0;
   private _currentFps = 0;
 
+  // Performance: track camera state to detect OrbitControls changes
+  private _lastCameraPosition = new THREE.Vector3();
+  private _lastCameraTarget = new THREE.Vector3();
+
+  // Performance: throttle particle animation (frame counter)
+  private _particleAnimFrame = 0;
+  private static readonly PARTICLE_ANIM_INTERVAL = 3;  // Update every 3 frames
+
+  // Debug mode: disable validation traversals in production
+  static DEBUG_MODE = false;  // Set to true for debugging piece overlap issues
+
   // Performance: pooled scratch vectors (avoid GC churn from frequent allocations)
   // These are reused across frames in _updatePanning() for camera movement calculations.
   //
@@ -1284,6 +1378,14 @@ class Board3DManager implements IBoard3D {
   private _resizeObserver: ResizeObserver | null = null;
   private _lastContainerWidth = 0;
   private _lastContainerHeight = 0;
+
+  // Store bound event handlers for proper cleanup in dispose()
+  private _boundPointerDown: ((e: PointerEvent) => void) | null = null;
+  private _boundPointerUp: ((e: PointerEvent) => void) | null = null;
+  private _boundResize: (() => void) | null = null;
+  private _boundKeyDown: ((e: KeyboardEvent) => void) | null = null;
+  private _boundKeyUp: ((e: KeyboardEvent) => void) | null = null;
+  private _boundBeforeUnload: (() => void) | null = null;
 
   // Visual effects storage
   private _activeEffects: Array<{
@@ -1442,21 +1544,30 @@ class Board3DManager implements IBoard3D {
     this._createFloor();
     this._createParticles();
 
-    this.renderer.domElement.addEventListener('pointerdown', (e: PointerEvent) => {
+    // Store bound event handlers for cleanup in dispose()
+    this._boundPointerDown = (e: PointerEvent) => {
       this._downPos = { x: e.clientX, y: e.clientY };
-    });
-    this.renderer.domElement.addEventListener('pointerup', (e: PointerEvent) => {
+    };
+    this._boundPointerUp = (e: PointerEvent) => {
       if (!this._downPos) return;
       const dx = e.clientX - this._downPos.x;
       const dy = e.clientY - this._downPos.y;
       if (dx * dx + dy * dy < 36) this._onClick(e);
       this._downPos = null;
-    });
+    };
+    this._boundResize = () => this._scheduleResize();
+    this._boundKeyDown = (e: KeyboardEvent) => this._onKeyDown(e);
+    this._boundKeyUp = (e: KeyboardEvent) => this._onKeyUp(e);
+    this._boundBeforeUnload = () => this.dispose();
+
+    this.renderer.domElement.addEventListener('pointerdown', this._boundPointerDown);
+    this.renderer.domElement.addEventListener('pointerup', this._boundPointerUp);
+
     // Window resize handler with debouncing
-    window.addEventListener('resize', () => this._scheduleResize());
+    window.addEventListener('resize', this._boundResize);
 
     // ResizeObserver for container size changes (handles sidebar resize, etc.)
-    this._resizeObserver = new ResizeObserver(() => this._scheduleResize());
+    this._resizeObserver = new ResizeObserver(this._boundResize);
     this._resizeObserver.observe(this.container);
 
     // Store initial dimensions
@@ -1464,8 +1575,11 @@ class Board3DManager implements IBoard3D {
     this._lastContainerHeight = this.container.clientHeight;
 
     // WASD keyboard panning
-    window.addEventListener('keydown', (e: KeyboardEvent) => this._onKeyDown(e));
-    window.addEventListener('keyup', (e: KeyboardEvent) => this._onKeyUp(e));
+    window.addEventListener('keydown', this._boundKeyDown);
+    window.addEventListener('keyup', this._boundKeyUp);
+
+    // Tab close cleanup - dispose all resources to prevent lag
+    window.addEventListener('beforeunload', this._boundBeforeUnload);
 
     this._animate();
   }
@@ -2159,15 +2273,30 @@ class Board3DManager implements IBoard3D {
     // Controls damping requires constant updates
     this.controls.update();
 
-    // Particle animation (runs always for ambient effect, but lightweight)
-    if (this.particleSystem) {
+    // Detect OrbitControls camera movement (mouse drag, zoom, etc.)
+    if (!this.camera.position.equals(this._lastCameraPosition) ||
+        !this.controls.target.equals(this._lastCameraTarget)) {
+      this._needsRender = true;
+      this._lastCameraPosition.copy(this.camera.position);
+      this._lastCameraTarget.copy(this.controls.target);
+    }
+
+    // Particle animation - THROTTLED to every N frames to reduce CPU load
+    // Original: 400 particles * Math.sin() every frame = expensive
+    // Optimized: Update every 3 frames, still looks smooth
+    this._particleAnimFrame++;
+    if (this.particleSystem && this._particleAnimFrame >= Board3DManager.PARTICLE_ANIM_INTERVAL) {
+      this._particleAnimFrame = 0;
       const pa = (this.particleSystem.geometry.attributes.position as BufferAttribute)
         .array as Float32Array;
+      // Scale movement by interval to maintain visual speed
+      const moveFactor = 0.001 * Board3DManager.PARTICLE_ANIM_INTERVAL;
       for (let i = 1; i < pa.length; i += 3) {
-        pa[i] += Math.sin(t * 0.5 + i) * 0.001;
+        pa[i] += Math.sin(t * 0.5 + i) * moveFactor;
       }
       this.particleSystem.geometry.attributes.position.needsUpdate = true;
       this.particleSystem.rotation.y = t * 0.006;
+      this._needsRender = true;
     }
 
     // Pulse effects only need render every ~100ms, not every frame
@@ -2193,11 +2322,13 @@ class Board3DManager implements IBoard3D {
       this._needsRender = true;
     }
 
-    // Only render if something changed or we have active animations
-    // For now, always render but track FPS - can make this stricter later
-    this.renderer.render(this.scene, this.camera);
-    this._lastRenderTime = t;
-    this._needsRender = false;
+    // PERFORMANCE: Only render when dirty flag is set
+    // This can save significant GPU/CPU when the scene is static
+    if (this._needsRender) {
+      this.renderer.render(this.scene, this.camera);
+      this._lastRenderTime = t;
+      this._needsRender = false;
+    }
   }
 
   /** Update FPS display in UI */
@@ -2327,8 +2458,143 @@ class Board3DManager implements IBoard3D {
     // Clear branch line metadata
     this._branchLineData = [];
     this.controls?.target.set(0, 0, 0);
-    // Clear mesh pool when resetting game
+    // Clear object pools when resetting game
     meshPool.clear();
+    spritePool.clear();
+  }
+
+  /**
+   * Comprehensive cleanup method for tab close / page unload.
+   * Disposes all Three.js resources to prevent memory leaks and GPU context issues.
+   * Call this on beforeunload event or when destroying the game instance.
+   */
+  dispose(): void {
+    // Clear all timelines first
+    this.clearAll();
+
+    // Dispose particle system
+    if (this.particleSystem) {
+      this.particleSystem.geometry?.dispose();
+      if (this.particleSystem.material) {
+        (this.particleSystem.material as Material).dispose();
+      }
+      this.scene?.remove(this.particleSystem);
+      this.particleSystem = null;
+    }
+
+    // Dispose branch line group and its contents
+    if (this.branchLineGroup && this.scene) {
+      this.branchLineGroup.traverse((child: Object3D) => {
+        const mesh = child as Mesh;
+        if (mesh.isMesh) {
+          mesh.geometry?.dispose();
+          if (mesh.material) {
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach(m => m.dispose());
+            } else {
+              (mesh.material as Material).dispose();
+            }
+          }
+        }
+      });
+      this.scene.remove(this.branchLineGroup);
+      this.branchLineGroup = null;
+    }
+
+    // Dispose active effects
+    for (const eff of this._activeEffects) {
+      eff.mesh.geometry?.dispose();
+      if (eff.mesh.material) {
+        if (Array.isArray(eff.mesh.material)) {
+          eff.mesh.material.forEach(m => m.dispose());
+        } else {
+          (eff.mesh.material as Material).dispose();
+        }
+      }
+      this.scene?.remove(eff.mesh);
+    }
+    this._activeEffects = [];
+
+    // Dispose shared materials
+    this._lightSquareMat?.dispose();
+    this._darkSquareMat?.dispose();
+    this._historyLightSquareMat?.dispose();
+    this._historyDarkSquareMat?.dispose();
+    this._boardBaseMat?.dispose();
+    this._boardTrimMat?.dispose();
+    this._lightSquareMat = null;
+    this._darkSquareMat = null;
+    this._historyLightSquareMat = null;
+    this._historyDarkSquareMat = null;
+    this._boardBaseMat = null;
+    this._boardTrimMat = null;
+
+    // Dispose texture cache
+    for (const key in this._texCache) {
+      this._texCache[key]?.dispose();
+    }
+    this._texCache = {};
+
+    // Dispose SharedResources singleton
+    SharedResources.getInstance().dispose();
+
+    // Clear mesh pool
+    meshPool.clear();
+
+    // Disconnect resize observer
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
+    }
+
+    // Clear resize timeout
+    if (this._resizeTimeout !== null) {
+      window.clearTimeout(this._resizeTimeout);
+      this._resizeTimeout = null;
+    }
+
+    // Remove event listeners using stored bound handlers
+    if (this._boundResize) {
+      window.removeEventListener('resize', this._boundResize);
+    }
+    if (this._boundKeyDown) {
+      window.removeEventListener('keydown', this._boundKeyDown);
+    }
+    if (this._boundKeyUp) {
+      window.removeEventListener('keyup', this._boundKeyUp);
+    }
+    if (this._boundBeforeUnload) {
+      window.removeEventListener('beforeunload', this._boundBeforeUnload);
+    }
+    // Canvas event listeners - removed when canvas is removed from DOM
+    // No need to explicitly remove if renderer.domElement is removed
+
+    this._boundPointerDown = null;
+    this._boundPointerUp = null;
+    this._boundResize = null;
+    this._boundKeyDown = null;
+    this._boundKeyUp = null;
+    this._boundBeforeUnload = null;
+
+    // Dispose renderer
+    if (this.renderer) {
+      this.renderer.dispose();
+      this.renderer.forceContextLoss();
+      if (this.container && this.renderer.domElement.parentNode === this.container) {
+        this.container.removeChild(this.renderer.domElement);
+      }
+      this.renderer = null;
+    }
+
+    // Clear references
+    this.scene = null;
+    this.camera = null;
+    this.controls = null;
+    this.raycaster = null;
+    this.mouse = null;
+    this.container = null;
+    this._clock = null;
+    this.onSquareClick = null;
   }
 }
 
