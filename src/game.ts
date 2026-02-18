@@ -1366,6 +1366,16 @@ timelines - list timelines`,
     this.clearSelection();
     this.renderTimeline(sourceTimelineId);
     this.renderTimeline(targetTimelineId);
+
+    // Validate no duplicate sprites after cross-timeline renders
+    // This catches edge cases where sprites weren't properly cleaned up
+    if (sourceCol) {
+      sourceCol.validateNoDuplicates();
+    }
+    if (targetCol) {
+      targetCol.validateNoDuplicates();
+    }
+
     console.log('[crossTimeline] VISUAL_TRAILS_DEBUG: Render complete', {
       timestamp: Date.now(),
     });
@@ -1701,6 +1711,16 @@ timelines - list timelines`,
     this.setActiveTimeline(newId, shouldFocus);
     this.renderTimeline(sourceTimelineId);
     this.renderTimeline(newId);
+
+    // Validate no duplicate sprites after time travel renders
+    // (sourceCol and newCol are already declared earlier in this function)
+    if (sourceCol) {
+      sourceCol.validateNoDuplicates();
+    }
+    if (newCol) {
+      newCol.validateNoDuplicates();
+    }
+
     console.log('[Time Travel] VISUAL_TRAILS_DEBUG: Render complete', {
       timestamp: Date.now(),
     });

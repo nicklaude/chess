@@ -118,6 +118,12 @@ export interface ITimelineCol {
   hasBranchDrawn(snapshotIndex: number): boolean;
   showCrossTimelineTarget(sq: string, isCapture: boolean): void;
   clearCrossTimelineTargets(): void;
+  /**
+   * Validates that no duplicate sprites exist at MAIN_PIECE_Y height.
+   * If duplicates are found, logs an error with details and removes the extras.
+   * @returns true if no duplicates were found, false if duplicates were detected and fixed
+   */
+  validateNoDuplicates(): boolean;
 }
 
 // ===============================================================

@@ -292,6 +292,9 @@ export class TimelineCol implements ITimelineCol {
   // These MUST be different to prevent visual overlap
   static readonly MAIN_PIECE_Y = 0.22;
   static readonly HISTORY_PIECE_Y = 0.12;
+  // Board bounds for piece position validation (8x8 board centered at origin)
+  private static readonly BOARD_MIN = -4;
+  private static readonly BOARD_MAX = 4;
 
   private scene: Scene;
   private shared: SharedResources;
@@ -351,6 +354,15 @@ export class TimelineCol implements ITimelineCol {
 
   private _fromSq(sq: string): { r: number; c: number } {
     return { r: 8 - parseInt(sq[1]), c: sq.charCodeAt(0) - 97 };
+  }
+
+  /** Type guard for checking if an Object3D is a main board piece sprite */
+  private _isMainBoardSprite(obj: Object3D): obj is Sprite {
+    if (!(obj as Sprite).isSprite) return false;
+    if (Math.abs(obj.position.y - TimelineCol.MAIN_PIECE_Y) >= 0.01) return false;
+    const { x, z } = obj.position;
+    return x >= TimelineCol.BOARD_MIN && x <= TimelineCol.BOARD_MAX &&
+           z >= TimelineCol.BOARD_MIN && z <= TimelineCol.BOARD_MAX;
   }
 
   private _sqToWorld(sq: string, y?: number): Vector3 {
@@ -443,39 +455,45 @@ export class TimelineCol implements ITimelineCol {
     }
     this.pieceMeshes.length = 0;  // Clear array in place
 
-    // Also do a safety check - remove any orphaned sprites from the group
-    // This catches edge cases where sprites weren't properly tracked
-    // IMPORTANT: Only check direct children of this.group, not history layer sprites
+    // CRITICAL FIX for piece overlap bug:
+    // Three.js group.remove() may not immediately update the scene graph, and traverse()
+    // may still see stale sprites. Use direct children iteration for immediate cleanup.
+    // Iterate backwards to safely remove during iteration.
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if (this._isMainBoardSprite(child)) {
+        this.group.remove(child);
+        (child.material as SpriteMaterial).dispose();
+      }
+    }
+
+    // Secondary safety check using traverse() - catches sprites in nested groups
+    // This should rarely find anything but provides defense in depth
     const toRemove: Object3D[] = [];
     this.group.traverse((child: Object3D) => {
-      if ((child as Sprite).isSprite) {
-        // Check if this sprite is at MAIN board piece height (y = MAIN_PIECE_Y)
-        // History sprites are at HISTORY_PIECE_Y (0.12) so won't be caught
-        if (Math.abs(child.position.y - TimelineCol.MAIN_PIECE_Y) < 0.01) {
-          // Check if this sprite is NOT in our text labels (file/rank labels at edges)
-          const x = child.position.x;
-          const z = child.position.z;
-          if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
-            // Additional check: ensure this is a direct child of this.group, not inside a history layer
-            if (child.parent === this.group) {
-              toRemove.push(child);
-            } else {
-              // This should NEVER happen - a sprite at MAIN_PIECE_Y inside a nested group
-              console.error('[Board3D] PIECE_OVERLAP_BUG: Main piece sprite found in nested group!', {
-                timeline: this.id,
-                timestamp,
-                spritePos: { x: x.toFixed(2), y: child.position.y.toFixed(2), z: z.toFixed(2) },
-                parentType: child.parent?.type,
-              });
-            }
-          }
+      if (this._isMainBoardSprite(child)) {
+        // Skip if this is the group itself or already removed
+        if (child.parent === this.group) {
+          toRemove.push(child);
+        } else if (child.parent && child.parent !== this.group) {
+          // This should NEVER happen - a sprite at MAIN_PIECE_Y inside a nested group
+          console.error('[Board3D] PIECE_OVERLAP_BUG: Main piece sprite found in nested group!', {
+            timeline: this.id,
+            timestamp,
+            spritePos: {
+              x: child.position.x.toFixed(2),
+              y: child.position.y.toFixed(2),
+              z: child.position.z.toFixed(2)
+            },
+            parentType: child.parent?.type,
+          });
         }
       }
     });
 
-    // Log if we found orphaned sprites - this indicates a bug somewhere
+    // Log if we found orphaned sprites after direct children cleanup - indicates a deeper bug
     if (toRemove.length > 0) {
-      console.warn('[Board3D] VISUAL_TRAILS_BUG: Found', toRemove.length, 'orphaned piece sprites on timeline', this.id, {
+      console.warn('[Board3D] PIECE_OVERLAP_BUG: Found', toRemove.length, 'orphaned sprites after direct cleanup on timeline', this.id, {
         timestamp,
         orphanPositions: toRemove.map(obj => ({
           x: obj.position.x.toFixed(2),
@@ -568,6 +586,67 @@ export class TimelineCol implements ITimelineCol {
         trackedSprites: this.pieceMeshes.length,
       });
     }
+  }
+
+  /**
+   * Validates that no duplicate sprites exist at MAIN_PIECE_Y height.
+   * If duplicates are found, logs an error with details and removes the extras.
+   * Call this after renders to catch any edge cases where sprites weren't properly cleaned up.
+   * @returns true if no duplicates were found, false if duplicates were detected and fixed
+   */
+  validateNoDuplicates(): boolean {
+    const timestamp = Date.now();
+    const positionMap = new Map<string, { sprite: Sprite; pieceInfo: string }[]>();
+
+    // First pass: collect all sprites at MAIN_PIECE_Y grouped by position
+    for (let i = 0; i < this.group.children.length; i++) {
+      const child = this.group.children[i];
+      if (this._isMainBoardSprite(child)) {
+        const posKey = `${child.position.x.toFixed(2)},${child.position.z.toFixed(2)}`;
+
+        // Extract piece info from sprite texture/material if possible
+        const material = child.material as SpriteMaterial;
+        const pieceInfo = material?.map?.name ?? material?.name ?? 'unknown';
+
+        if (!positionMap.has(posKey)) {
+          positionMap.set(posKey, []);
+        }
+        positionMap.get(posKey)!.push({ sprite: child, pieceInfo });
+      }
+    }
+
+    // Second pass: identify duplicates and remove extras
+    let foundDuplicates = false;
+    positionMap.forEach((sprites, posKey) => {
+      if (sprites.length > 1) {
+        foundDuplicates = true;
+
+        // Convert position key back to chess square for logging
+        const [xStr, zStr] = posKey.split(',');
+        const x = parseFloat(xStr);
+        const z = parseFloat(zStr);
+        const col = Math.round(x + 3.5);
+        const row = Math.round(z + 3.5);
+        const square = String.fromCharCode(97 + col) + (8 - row);
+
+        console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites detected and auto-fixed!', {
+          timeline: this.id,
+          timestamp,
+          square,
+          position: posKey,
+          duplicateCount: sprites.length,
+          pieceTypes: sprites.map(s => s.pieceInfo),
+        });
+
+        // Keep the first sprite, remove the rest
+        for (let i = 1; i < sprites.length; i++) {
+          this.group.remove(sprites[i].sprite);
+          (sprites[i].sprite.material as SpriteMaterial).dispose();
+        }
+      }
+    });
+
+    return !foundDuplicates;
   }
 
   /* highlight / selection */
