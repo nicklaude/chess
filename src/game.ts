@@ -640,6 +640,19 @@ timelines - list timelines`,
         if (board[r] && board[r][c]) pieceCount++;
       }
     }
+    // TURN DEBUG: Log timeline creation with turn state
+    const fen = chess.fen();
+    const turnFromFen = fen.split(' ')[1];
+    console.log('[TURN_DEBUG] _createTimeline:', {
+      timelineId: id,
+      parentId,
+      branchTurn,
+      fen,
+      turnFromFen,
+      turnFromChess: chess.turn(),
+      pieceCount,
+      xOffset,
+    });
     console.log('[_createTimeline] Created timeline', id, 'with', pieceCount, 'pieces', {
       fen: chess.fen(),
       xOffset,
@@ -671,6 +684,21 @@ timelines - list timelines`,
 
   setActiveTimeline(id: number, autoFocus: boolean = true): void {
     const previousId = this.activeTimelineId;
+    const prevTl = this.timelines[previousId];
+    const newTl = this.timelines[id];
+
+    // TURN DEBUG: Log timeline switch
+    console.log('[TURN_DEBUG] setActiveTimeline:', {
+      previousTimelineId: previousId,
+      previousTimelineName: prevTl?.name,
+      previousTurn: prevTl?.chess.turn(),
+      previousFen: prevTl?.chess.fen(),
+      newTimelineId: id,
+      newTimelineName: newTl?.name,
+      newTurn: newTl?.chess.turn(),
+      newFen: newTl?.chess.fen(),
+    });
+
     this.activeTimelineId = id;
     this.viewingMoveIndex = null; // Reset to current position when switching timelines
     Board3D.setActiveTimeline(id);
@@ -757,6 +785,19 @@ timelines - list timelines`,
     const col = Board3D.getTimeline(tlId);
     if (!col) return;
 
+    // TURN DEBUG: Log click context
+    console.log('[TURN_DEBUG] _handleBoardClick:', {
+      timelineId: tlId,
+      timelineName: tl.name,
+      activeTimelineId: this.activeTimelineId,
+      clickedSquare: sq,
+      pieceAtSquare: piece ? { type: piece.type, color: piece.color } : null,
+      chessTurn: chess.turn(),
+      fen: chess.fen(),
+      currentSelection: this.selected,
+      selectedTimelineId: this.selectedTimelineId,
+    });
+
     if (this.selected && this.selectedTimelineId === tlId) {
       // Try to make a move
       const moves = chess.moves({ square: this.selected, verbose: true }) as ChessMove[];
@@ -769,6 +810,17 @@ timelines - list timelines`,
       }
 
       if (targetMove) {
+        // TURN DEBUG: Log before attempting move
+        const selectedPiece = chess.get(this.selected);
+        console.log('[TURN_DEBUG] About to make move:', {
+          timelineId: tlId,
+          timelineName: tl.name,
+          from: this.selected,
+          to: sq,
+          selectedPiece: selectedPiece ? { type: selectedPiece.type, color: selectedPiece.color } : null,
+          chessTurn: chess.turn(),
+          turnMismatch: selectedPiece && selectedPiece.color !== chess.turn(),
+        });
         this.makeMove(tlId, targetMove);
         return;
       }
@@ -780,6 +832,14 @@ timelines - list timelines`,
     }
 
     if (piece && piece.color === chess.turn()) {
+      // TURN DEBUG: Log piece selection
+      console.log('[TURN_DEBUG] Selecting piece (color matches turn):', {
+        timelineId: tlId,
+        timelineName: tl.name,
+        square: sq,
+        piece: { type: piece.type, color: piece.color },
+        chessTurn: chess.turn(),
+      });
       this.clearSelection();
       this.selected = sq;
       this.selectedTimelineId = tlId;
@@ -815,6 +875,18 @@ timelines - list timelines`,
         }
       }
     } else {
+      // TURN DEBUG: Log when piece selection is rejected (wrong color or empty square)
+      if (piece) {
+        console.log('[TURN_DEBUG] Selection REJECTED - wrong color:', {
+          timelineId: tlId,
+          timelineName: tl.name,
+          square: sq,
+          pieceColor: piece.color,
+          chessTurn: chess.turn(),
+          fen: chess.fen(),
+          reason: `Piece is ${piece.color === 'w' ? 'white' : 'black'} but it's ${chess.turn() === 'w' ? 'white' : 'black'}'s turn`,
+        });
+      }
       this.clearSelection();
     }
   }
@@ -928,6 +1000,39 @@ timelines - list timelines`,
     const chess = tl.chess;
     const isWhite = chess.turn() === 'w';
 
+    // TURN DEBUG: Log FEN and turn state BEFORE the move
+    const fenBefore = chess.fen();
+    const turnFromFenBefore = fenBefore.split(' ')[1]; // 'w' or 'b'
+    const pieceBeingMoved = chess.get(move.from);
+    const pieceColor = pieceBeingMoved?.color || 'unknown';
+
+    console.log('[TURN_DEBUG] makeMove ENTRY:', {
+      timelineId: tlId,
+      timelineName: tl.name,
+      fenBefore,
+      turnFromFen: turnFromFenBefore,
+      turnFromChess: chess.turn(),
+      pieceColor,
+      pieceType: pieceBeingMoved?.type || 'none',
+      moveFrom: move.from,
+      moveTo: move.to,
+      moveSan: move.san,
+      moveHistoryLength: tl.moveHistory.length,
+      snapshotsLength: tl.snapshots.length,
+    });
+
+    // TURN DEBUG: Flag mismatch between turn and piece color
+    if (pieceBeingMoved && pieceColor !== chess.turn()) {
+      console.error('[TURN_DEBUG] MISMATCH! Piece color does not match whose turn it is:', {
+        timelineId: tlId,
+        timelineName: tl.name,
+        expectedTurn: chess.turn(),
+        actualPieceColor: pieceColor,
+        fen: fenBefore,
+        move: `${move.from}-${move.to}`,
+      });
+    }
+
     // Check if this is a pawn promotion move that needs user input
     if (move.flags && move.flags.indexOf('p') !== -1 && !promotionPiece) {
       // Show promotion picker and wait for user choice
@@ -952,6 +1057,19 @@ timelines - list timelines`,
       console.error('Invalid move:', moveObj);
       return;
     }
+
+    // TURN DEBUG: Log FEN and turn state AFTER the move
+    const fenAfter = chess.fen();
+    const turnFromFenAfter = fenAfter.split(' ')[1];
+    console.log('[TURN_DEBUG] makeMove AFTER chess.move():', {
+      timelineId: tlId,
+      timelineName: tl.name,
+      fenAfter,
+      turnFromFenAfter,
+      turnFromChess: chess.turn(),
+      resultSan: result.san,
+      capturedPiece: result.captured || 'none',
+    });
 
     // Store the actual promotion piece used (if any)
     // Use result.captured (actual move result) instead of move.captured (potential move)
@@ -1080,6 +1198,22 @@ timelines - list timelines`,
     const isWhite = piece.color === 'w';
     const targetPiece = targetTl.chess.get(square);
 
+    // TURN DEBUG: Log cross-timeline move entry
+    console.log('[TURN_DEBUG] makeCrossTimelineMove ENTRY:', {
+      sourceTimelineId,
+      sourceTimelineName: sourceTl.name,
+      sourceFen: sourceTl.chess.fen(),
+      sourceTurn: sourceTl.chess.turn(),
+      targetTimelineId,
+      targetTimelineName: targetTl.name,
+      targetFen: targetTl.chess.fen(),
+      targetTurn: targetTl.chess.turn(),
+      square,
+      piece: { type: piece.type, color: piece.color },
+      pieceIsWhite: isWhite,
+      targetPiece: targetPiece ? { type: targetPiece.type, color: targetPiece.color } : null,
+    });
+
     // Clone boards before move for snapshots
     const sourceBoardBefore = this._cloneBoard(sourceTl.chess);
     const targetBoardBefore = this._cloneBoard(targetTl.chess);
@@ -1194,6 +1328,18 @@ timelines - list timelines`,
       Board3D.spawnCaptureEffect(targetTimelineId, square);
     }
 
+    // TURN DEBUG: Log turn state after cross-timeline move completed
+    console.log('[TURN_DEBUG] makeCrossTimelineMove AFTER:', {
+      sourceTimelineId,
+      sourceTimelineName: sourceTl.name,
+      sourceFenAfter: sourceTl.chess.fen(),
+      sourceTurnAfter: sourceTl.chess.turn(),
+      targetTimelineId,
+      targetTimelineName: targetTl.name,
+      targetFenAfter: targetTl.chess.fen(),
+      targetTurnAfter: targetTl.chess.turn(),
+    });
+
     // 5. Update UI
     console.log('[crossTimeline] VISUAL_TRAILS_DEBUG: About to render after cross-timeline move', {
       timestamp: Date.now(),
@@ -1276,6 +1422,18 @@ timelines - list timelines`,
   ): void {
     const sourceTl = this.timelines[sourceTimelineId];
     if (!sourceTl) return;
+
+    // TURN DEBUG: Log time travel move entry
+    console.log('[TURN_DEBUG] _makeTimeTravelMove ENTRY:', {
+      sourceTimelineId,
+      sourceTimelineName: sourceTl.name,
+      sourceFen: sourceTl.chess.fen(),
+      sourceTurn: sourceTl.chess.turn(),
+      sourceSquare,
+      targetTurnIndex,
+      piece: { type: piece.type, color: piece.color },
+      capturedPiece: capturedPiece ? { type: capturedPiece.type, color: capturedPiece.color } : null,
+    });
 
     // VALIDATION: Verify the piece actually exists at the source square
     const actualPiece = sourceTl.chess.get(sourceSquare);
@@ -1540,6 +1698,18 @@ timelines - list timelines`,
     if (capturedPiece) {
       Board3D.spawnCaptureEffect(newId, sourceSquare);
     }
+
+    // TURN DEBUG: Log final state after time travel move
+    console.log('[TURN_DEBUG] _makeTimeTravelMove COMPLETE:', {
+      sourceTimelineId,
+      sourceTimelineName: sourceTl.name,
+      sourceFenAfter: sourceTl.chess.fen(),
+      sourceTurnAfter: sourceTl.chess.turn(),
+      newTimelineId: newId,
+      newTimelineName: newTl.name,
+      newTimelineFen: newTl.chess.fen(),
+      newTimelineTurn: newTl.chess.turn(),
+    });
   }
 
   /** Helper: Modify a FEN string to change a square's piece and flip turn.
@@ -1923,6 +2093,26 @@ timelines - list timelines`,
     const turn = chess.turn() === 'w' ? 'White' : 'Black';
     const prefix =
       Object.keys(this.timelines).length > 1 ? '[' + tl.name + '] ' : '';
+
+    // TURN DEBUG: Log status update with full turn state for all timelines
+    const allTimelinesTurnState: Record<string, { name: string; turn: string; fen: string; moveCount: number }> = {};
+    for (const tlIdStr of Object.keys(this.timelines)) {
+      const t = this.timelines[parseInt(tlIdStr)];
+      allTimelinesTurnState[tlIdStr] = {
+        name: t.name,
+        turn: t.chess.turn(),
+        fen: t.chess.fen(),
+        moveCount: t.moveHistory.length,
+      };
+    }
+    console.log('[TURN_DEBUG] updateStatus:', {
+      activeTimelineId: this.activeTimelineId,
+      activeTimelineName: tl.name,
+      displayingTurn: turn,
+      chessTurn: chess.turn(),
+      fen: chess.fen(),
+      allTimelines: allTimelinesTurnState,
+    });
 
     if (chess.in_checkmate()) {
       const winner = chess.turn() === 'w' ? 'Black' : 'White';
