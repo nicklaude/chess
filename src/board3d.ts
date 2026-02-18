@@ -740,6 +740,18 @@ class Board3DManager implements IBoard3D {
     type: 'portal' | 'capture';
   }> = [];
 
+  // Branch/portal line fade configuration
+  private static readonly LINE_FADE_DURATION = 30; // seconds until lines reach minimum opacity
+  private static readonly LINE_MIN_OPACITY = 0.25; // lines never fully disappear (25% minimum)
+  private static readonly LINE_FADE_UPDATE_INTERVAL = 0.5; // update fades every 0.5 seconds
+  private _lastLineFadeUpdate = 0;
+
+  // Track branch lines with their creation time for gradual fading
+  private _branchLines: Array<{
+    group: Group;
+    creationTime: number;
+  }> = [];
+
   readonly PIECE_CHARS: PieceCharMap = {
     K: '\u2654',
     Q: '\u2655',
@@ -943,7 +955,7 @@ class Board3DManager implements IBoard3D {
   addBranchLine(fromTlId: number, fromTurn: number, toTlId: number): void {
     const fromCol = this.timelineCols[fromTlId];
     const toCol = this.timelineCols[toTlId];
-    if (!fromCol || !toCol || !this.branchLineGroup) return;
+    if (!fromCol || !toCol || !this.branchLineGroup || !this._clock) return;
 
     // Skip if this branch point has already been drawn
     const branchKey = fromTurn;
@@ -956,14 +968,21 @@ class Board3DManager implements IBoard3D {
     const from = new THREE.Vector3(fromCol.xOffset, fromY + 0.2, 0);
     const to = new THREE.Vector3(toCol.xOffset, 0.2, 0);
     const tintCol = this.TIMELINE_COLORS[toTlId % this.TIMELINE_COLORS.length];
-    this.branchLineGroup.add(Board3DManager._glowTube(from, to, tintCol, 0.04, 0.18, true));
+    const lineGroup = Board3DManager._glowTube(from, to, tintCol, 0.04, 0.18, true);
+    this.branchLineGroup.add(lineGroup);
+
+    // Track line for gradual fading
+    this._branchLines.push({
+      group: lineGroup,
+      creationTime: this._clock.getElapsedTime(),
+    });
   }
 
   /** Add a horizontal line showing cross-timeline piece movement */
   addCrossTimelineLine(fromTlId: number, toTlId: number, square: string, isWhite: boolean): void {
     const fromCol = this.timelineCols[fromTlId];
     const toCol = this.timelineCols[toTlId];
-    if (!fromCol || !toCol || !this.branchLineGroup) return;
+    if (!fromCol || !toCol || !this.branchLineGroup || !this._clock) return;
 
     // Get the 3D position of the square in each timeline
     const pos = this._fromSq(square);
@@ -975,7 +994,14 @@ class Board3DManager implements IBoard3D {
 
     // Purple for cross-timeline moves
     const color = 0xaa44ff;
-    this.branchLineGroup.add(Board3DManager._glowTube(from, to, color, 0.03, 0.12, true));
+    const lineGroup = Board3DManager._glowTube(from, to, color, 0.03, 0.12, true);
+    this.branchLineGroup.add(lineGroup);
+
+    // Track line for gradual fading
+    this._branchLines.push({
+      group: lineGroup,
+      creationTime: this._clock.getElapsedTime(),
+    });
   }
 
   /** Add a time travel line showing queen moving backward in time to create new timeline */
@@ -988,7 +1014,7 @@ class Board3DManager implements IBoard3D {
   ): void {
     const sourceCol = this.timelineCols[sourceTlId];
     const newCol = this.timelineCols[newTlId];
-    if (!sourceCol || !newCol || !this.branchLineGroup) return;
+    if (!sourceCol || !newCol || !this.branchLineGroup || !this._clock) return;
 
     const pos = this._fromSq(square);
     const sqX = pos.c - 3.5;
@@ -1011,10 +1037,17 @@ class Board3DManager implements IBoard3D {
     const color = 0x44ffaa;
 
     // Vertical line down through time
-    this.branchLineGroup.add(Board3DManager._glowTube(start, mid, color, 0.03, 0.12, false));
+    const verticalLine = Board3DManager._glowTube(start, mid, color, 0.03, 0.12, false);
+    this.branchLineGroup.add(verticalLine);
 
     // Horizontal/arc line to new timeline
-    this.branchLineGroup.add(Board3DManager._glowTube(mid, end, color, 0.03, 0.12, true));
+    const horizontalLine = Board3DManager._glowTube(mid, end, color, 0.03, 0.12, true);
+    this.branchLineGroup.add(horizontalLine);
+
+    // Track both lines for gradual fading (they share the same creation time)
+    const creationTime = this._clock.getElapsedTime();
+    this._branchLines.push({ group: verticalLine, creationTime });
+    this._branchLines.push({ group: horizontalLine, creationTime });
   }
 
   private _fromSq(sq: string): { r: number; c: number } {
@@ -1076,6 +1109,50 @@ class Board3DManager implements IBoard3D {
 
     if (progress >= 1) {
       this._focusTween = undefined;
+    }
+  }
+
+  /**
+   * Update branch/portal line opacities based on age.
+   * Lines start fully bright and gradually fade to a minimum opacity.
+   * This helps reduce visual clutter as the game progresses.
+   */
+  private _updateBranchLineFades(): void {
+    if (!this._clock || this._branchLines.length === 0) return;
+
+    const currentTime = this._clock.getElapsedTime();
+
+    // Only update periodically to avoid performance overhead
+    if (currentTime - this._lastLineFadeUpdate < Board3DManager.LINE_FADE_UPDATE_INTERVAL) {
+      return;
+    }
+    this._lastLineFadeUpdate = currentTime;
+
+    for (const lineData of this._branchLines) {
+      const age = currentTime - lineData.creationTime;
+      // Calculate opacity: starts at 1.0, fades to MIN_OPACITY over FADE_DURATION seconds
+      const fadeProgress = Math.min(age / Board3DManager.LINE_FADE_DURATION, 1);
+      const opacity = Math.max(
+        Board3DManager.LINE_MIN_OPACITY,
+        1.0 - fadeProgress * (1.0 - Board3DManager.LINE_MIN_OPACITY)
+      );
+
+      // Apply opacity to all meshes in the line group
+      lineData.group.traverse((child: Object3D) => {
+        const mesh = child as Mesh;
+        if (mesh.isMesh && mesh.material) {
+          const mat = mesh.material as Material;
+          if (mat.transparent) {
+            // Scale the material's base opacity by the fade factor
+            // The original opacities vary (0.1, 0.22, 0.75, 0.6 for different parts)
+            // We store original opacity in userData if not already set
+            if (mat.userData.originalOpacity === undefined) {
+              mat.userData.originalOpacity = mat.opacity;
+            }
+            mat.opacity = mat.userData.originalOpacity * opacity;
+          }
+        }
+      });
     }
   }
 
@@ -1459,6 +1536,12 @@ class Board3DManager implements IBoard3D {
       this._needsRender = true;
     }
 
+    // Update branch/portal line fading (gradual opacity reduction over time)
+    if (this._branchLines.length > 0) {
+      this._updateBranchLineFades();
+      this._needsRender = true;
+    }
+
     // Controls damping requires constant updates
     this.controls.update();
 
@@ -1627,6 +1710,9 @@ class Board3DManager implements IBoard3D {
         this.branchLineGroup.remove(this.branchLineGroup.children[0]);
       }
     }
+    // Clear branch line tracking for fade system
+    this._branchLines = [];
+    this._lastLineFadeUpdate = 0;
     this.controls?.target.set(0, 0, 0);
   }
 }
