@@ -33,6 +33,7 @@
   },
   "homepage": "https://github.com/nicklaude/chess#readme",
   "devDependencies": {
+    "@types/node": "^25.2.3",
     "@types/three": "^0.182.0",
     "chess.js": "^0.10.3",
     "esbuild": "^0.27.3",
