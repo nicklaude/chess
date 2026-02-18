@@ -1090,17 +1090,57 @@ timelines - list timelines`,
     const sourceBoard = sourceTl.chess.board();
     const pos = this._fromSq(square);
 
+    // Verify piece exists on source before removal
+    const sourcePieceCheck = sourceTl.chess.get(square);
+    if (!sourcePieceCheck || sourcePieceCheck.type !== piece.type || sourcePieceCheck.color !== piece.color) {
+      console.error('[Cross-Timeline] Source piece mismatch!', {
+        expected: piece,
+        actual: sourcePieceCheck,
+        square,
+      });
+      throw new Error(`Cross-timeline move failed: source piece mismatch at ${square}`);
+    }
+
     // Build new FEN without the piece
     // For simplicity, we set the square to empty and flip turn
     // Source: piece left, no capture on source timeline
     const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite, false);
-    sourceTl.chess.load(newSourceFen);
+    const sourceLoadResult = sourceTl.chess.load(newSourceFen);
+    if (!sourceLoadResult) {
+      console.error('[Cross-Timeline] Failed to load source FEN after remove!', { fen: newSourceFen });
+      throw new Error(`Cross-timeline move failed: invalid source FEN after piece removal`);
+    }
+
+    // Validate remove worked - piece should no longer be there
+    const afterRemove = sourceTl.chess.get(square);
+    if (afterRemove) {
+      console.error('[Cross-Timeline] Piece still present after removal!', {
+        square,
+        stillThere: afterRemove,
+      });
+      throw new Error(`Cross-timeline move failed: piece still present at ${square} after removal`);
+    }
 
     // 2. Add piece to target timeline (capture if enemy piece there)
     const targetFen = targetTl.chess.fen();
     const isCrossCapture = targetPiece !== null;
     const newTargetFen = this._modifyFen(targetFen, square, piece, !isWhite, isCrossCapture);
-    targetTl.chess.load(newTargetFen);
+    const targetLoadResult = targetTl.chess.load(newTargetFen);
+    if (!targetLoadResult) {
+      console.error('[Cross-Timeline] Failed to load target FEN after placement!', { fen: newTargetFen });
+      throw new Error(`Cross-timeline move failed: invalid target FEN after piece placement`);
+    }
+
+    // Validate placement worked - piece should now be there
+    const afterPlace = targetTl.chess.get(square);
+    if (!afterPlace || afterPlace.type !== piece.type || afterPlace.color !== piece.color) {
+      console.error('[Cross-Timeline] Piece placement verification failed!', {
+        expected: piece,
+        actual: afterPlace,
+        square,
+      });
+      throw new Error(`Cross-timeline move failed: piece not found at ${square} after placement`);
+    }
 
     // 3. Record the move in both timelines
     // Use actual piece character (not hardcoded Q) for future extensibility
@@ -1360,13 +1400,37 @@ timelines - list timelines`,
     // Remove any piece currently on target (capture)
     const existingPiece = newTl.chess.get(targetSquare);
     if (existingPiece) {
-      newTl.chess.remove(targetSquare);
+      const removed = newTl.chess.remove(targetSquare);
+      if (!removed) {
+        console.error('[Time Travel] Failed to remove existing piece at', targetSquare, existingPiece);
+        throw new Error(`Time travel failed: could not remove existing piece at ${targetSquare}`);
+      }
+      console.log('[Time Travel] Removed existing piece:', { square: targetSquare, piece: existingPiece });
+    }
+
+    // Validate target square is now empty before placing
+    const afterRemove = newTl.chess.get(targetSquare);
+    if (afterRemove) {
+      console.error('[Time Travel] Square not empty after remove!', { square: targetSquare, stillThere: afterRemove });
+      throw new Error(`Time travel failed: square ${targetSquare} not empty after remove operation`);
     }
 
     // Place the time-traveled piece
     const placed = newTl.chess.put(piece, targetSquare);
     if (!placed) {
       console.error('[Time Travel] Failed to place piece at', targetSquare, piece);
+      throw new Error(`Time travel failed: could not place ${piece.type} at ${targetSquare}`);
+    }
+
+    // Verify the piece was actually placed correctly (no overlaps)
+    const verifyPlaced = newTl.chess.get(targetSquare);
+    if (!verifyPlaced || verifyPlaced.type !== piece.type || verifyPlaced.color !== piece.color) {
+      console.error('[Time Travel] Piece placement verification failed!', {
+        expected: piece,
+        actual: verifyPlaced,
+        square: targetSquare,
+      });
+      throw new Error(`Time travel failed: piece placement verification failed at ${targetSquare}`);
     }
 
     // Fix turn synchronization: After time travel arrival, it's the opponent's turn.
@@ -1602,16 +1666,17 @@ timelines - list timelines`,
     const testChess = new Chess();
     const valid = testChess.load(result);
     if (!valid) {
-      console.error('[_modifyFen] Generated invalid FEN!', {
+      const errorDetails = {
         input: fen,
         output: result,
         square,
         newPiece,
         pos,
         rowArr,
-      });
-      // Return original FEN if we broke it
-      return fen;
+      };
+      console.error('[_modifyFen] CRITICAL: Generated invalid FEN!', errorDetails);
+      // Throw error to make validation failures obvious rather than silently returning original
+      throw new Error(`FEN modification failed: invalid result "${result}" from input "${fen}" (square=${square}, newPiece=${JSON.stringify(newPiece)})`);
     }
 
     console.log('[_modifyFen] Result:', { input: fen, output: result, square, newPiece, valid });
