@@ -8,7 +8,10 @@
     "watch": "node build.js --watch",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit && echo 'Types OK!'",
-    "test": "npx ts-node test/headless-runner.ts",
+    "test": "npm run test:unit && npm run test:integration && npm run test:headless",
+    "test:unit": "npx ts-node test/unit.test.ts",
+    "test:integration": "npx ts-node test/integration.test.ts",
+    "test:headless": "npx ts-node test/headless-runner.ts",
     "test:quick": "npx ts-node test/headless-runner.ts 5 50",
     "test:stress": "npx ts-node test/headless-runner.ts 50 200"
   },

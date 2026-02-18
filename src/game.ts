@@ -1,6 +1,22 @@
 /* 6D Chess - multiverse game controller with timeline branching */
 
 import { Board3D, TimelineCol } from './board3d';
+import {
+  expandFenRow,
+  compressFenRow,
+  squareToIndices,
+  parseFen,
+  buildFen,
+  updateCastlingForRemoval,
+  updateCastlingForPlacement,
+  modifyFen as modifyFenUtil,
+  getTimelineDebugInfo,
+  logGameState,
+  isValidFen,
+  validateKings,
+  type BoardDebugInfo,
+  type GameDebugState,
+} from './gameUtils';
 import type {
   Board,
   Piece,
@@ -1714,145 +1730,44 @@ timelines - list timelines`,
 
   /** Helper: Modify a FEN string to change a square's piece and flip turn.
    * Also updates castling rights, en passant, halfmove clock, and fullmove number.
+   * Uses utility functions from gameUtils.ts for clean, testable logic.
    * @param isCapture - Set to true if this modification represents a capture
    */
   private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean, isCapture: boolean = false): string {
-    const parts = fen.split(' ');
-    const rows = parts[0].split('/');
-    const pos = this._fromSq(square);
+    // Use the centralized modifyFen utility which handles all FEN modification logic
+    // including castling rights, en passant reset, halfmove clock, and fullmove number
+    const result = modifyFenUtil({
+      fen,
+      square,
+      newPiece,
+      whiteToMove,
+      isCapture,
+      resetEnPassant: true,  // Always reset en passant on time travel/cross-timeline
+    });
 
-    // Convert FEN row to array of chars
-    const expandRow = (row: string): string[] => {
-      const result: string[] = [];
-      for (const char of row) {
-        if (char >= '1' && char <= '8') {
-          for (let i = 0; i < parseInt(char); i++) result.push('');
-        } else {
-          result.push(char);
-        }
-      }
-      return result;
-    };
-
-    // Compress array back to FEN row
-    const compressRow = (arr: string[]): string => {
-      let result = '';
-      let emptyCount = 0;
-      for (const char of arr) {
-        if (char === '') {
-          emptyCount++;
-        } else {
-          if (emptyCount > 0) {
-            result += emptyCount;
-            emptyCount = 0;
-          }
-          result += char;
-        }
-      }
-      if (emptyCount > 0) result += emptyCount;
-      return result;
-    };
-
-    // Modify the specific square
-    console.log('[_modifyFen] pos:', pos, 'rows:', rows, 'rows[pos.r]:', rows[pos.r]);
-    if (!rows[pos.r]) {
-      console.error('[_modifyFen] Invalid row index:', pos.r, 'FEN rows:', rows);
-      return fen;  // Return unchanged if invalid
-    }
-    const rowArr = expandRow(rows[pos.r]);
-    console.log('[_modifyFen] expanded row:', rowArr);
-
-    // Track what piece was there before
-    const oldPieceChar = rowArr[pos.c];
-
-    if (newPiece) {
-      const pieceChar = newPiece.color === 'w'
-        ? newPiece.type.toUpperCase()
-        : newPiece.type.toLowerCase();
-      rowArr[pos.c] = pieceChar;
-    } else {
-      rowArr[pos.c] = '';
-    }
-    rows[pos.r] = compressRow(rowArr);
-
-    // Update board position
-    parts[0] = rows.join('/');
-
-    // Flip turn
-    parts[1] = whiteToMove ? 'w' : 'b';
-
-    // Update castling rights (parts[2]) - remove rights when rooks/kings move
-    let castling = parts[2] || '-';
-    if (castling !== '-') {
-      // If a rook or king is being removed (newPiece is null), update castling
-      if (!newPiece && oldPieceChar) {
-        const removedPiece = oldPieceChar.toLowerCase();
-        const isWhitePiece = oldPieceChar === oldPieceChar.toUpperCase();
-
-        if (removedPiece === 'k') {
-          // King removed - remove all castling rights for that color
-          if (isWhitePiece) {
-            castling = castling.replace(/[KQ]/g, '');
-          } else {
-            castling = castling.replace(/[kq]/g, '');
-          }
-        } else if (removedPiece === 'r') {
-          // Rook removed - check which corner
-          if (square === 'a1') castling = castling.replace('Q', '');
-          else if (square === 'h1') castling = castling.replace('K', '');
-          else if (square === 'a8') castling = castling.replace('q', '');
-          else if (square === 'h8') castling = castling.replace('k', '');
-        }
-      }
-      // If a piece is being placed on a rook square, also invalidate that castling
-      if (newPiece) {
-        if (square === 'a1') castling = castling.replace('Q', '');
-        else if (square === 'h1') castling = castling.replace('K', '');
-        else if (square === 'a8') castling = castling.replace('q', '');
-        else if (square === 'h8') castling = castling.replace('k', '');
-      }
-      if (castling === '') castling = '-';
-    }
-    parts[2] = castling;
-
-    // Always reset en passant on timeline branches/time travel
-    // (The historical en passant is no longer valid since a move was made)
-    parts[3] = '-';
-
-    // Halfmove clock: reset on capture or pawn move, increment otherwise
-    const isPawnMove = newPiece && newPiece.type === 'p';
-    if (isCapture || isPawnMove) {
-      parts[4] = '0';
-    } else {
-      // Non-capture, non-pawn move: increment halfmove clock
-      parts[4] = String(parseInt(parts[4] || '0') + 1);
-    }
-
-    // Fullmove number: increment when it becomes white's turn (after black moved)
-    if (whiteToMove) {
-      parts[5] = String(parseInt(parts[5] || '1') + 1);
-    }
-
-    const result = parts.join(' ');
-
-    // Validate the result by trying to parse it
-    const testChess = new Chess();
-    const valid = testChess.load(result);
-    if (!valid) {
-      const errorDetails = {
+    // Validate the result
+    if (!isValidFen(result)) {
+      console.error('[_modifyFen] CRITICAL: Generated invalid FEN!', {
         input: fen,
         output: result,
         square,
         newPiece,
-        pos,
-        rowArr,
-      };
-      console.error('[_modifyFen] CRITICAL: Generated invalid FEN!', errorDetails);
-      // Throw error to make validation failures obvious rather than silently returning original
+      });
       throw new Error(`FEN modification failed: invalid result "${result}" from input "${fen}" (square=${square}, newPiece=${JSON.stringify(newPiece)})`);
     }
 
-    console.log('[_modifyFen] Result:', { input: fen, output: result, square, newPiece, valid });
+    // Validate kings are still correct
+    const kingValidation = validateKings(result);
+    if (!kingValidation.valid) {
+      console.error('[_modifyFen] CRITICAL: Invalid king count after FEN modification!', {
+        input: fen,
+        output: result,
+        whiteKings: kingValidation.whiteKings,
+        blackKings: kingValidation.blackKings,
+      });
+      throw new Error(`FEN modification resulted in invalid king count: white=${kingValidation.whiteKings}, black=${kingValidation.blackKings}`);
+    }
+
     return result;
   }
 
@@ -2380,6 +2295,109 @@ timelines - list timelines`,
       }
     }
     return branches;
+  }
+
+  /* -- Global Game Over Detection -- */
+
+  /**
+   * Check if the game is globally over (all timelines in checkmate or stalemate)
+   */
+  isGlobalGameOver(): boolean {
+    for (const key in this.timelines) {
+      const tl = this.timelines[parseInt(key)];
+      if (!tl.chess.in_checkmate() && !tl.chess.in_stalemate() && !tl.chess.in_draw()) {
+        return false;
+      }
+    }
+    // All timelines are finished
+    return Object.keys(this.timelines).length > 0;
+  }
+
+  /**
+   * Get the global winner (if game is over)
+   * Returns 'white', 'black', 'draw', or null if game is not over
+   */
+  getGlobalWinner(): 'white' | 'black' | 'draw' | null {
+    if (!this.isGlobalGameOver()) return null;
+
+    let whiteWins = 0;
+    let blackWins = 0;
+    let draws = 0;
+
+    for (const key in this.timelines) {
+      const tl = this.timelines[parseInt(key)];
+      if (tl.chess.in_checkmate()) {
+        // The side to move is in checkmate, so the other side wins
+        if (tl.chess.turn() === 'w') blackWins++;
+        else whiteWins++;
+      } else {
+        // Stalemate or draw
+        draws++;
+      }
+    }
+
+    // If there are any decisive results, the side with more wins wins
+    if (whiteWins > blackWins) return 'white';
+    if (blackWins > whiteWins) return 'black';
+    return 'draw';
+  }
+
+  /* -- FEN Logging System (Phase 2) -- */
+
+  /**
+   * Get comprehensive debug info for all boards
+   * Returns an object with FEN, turn, move history, etc. for each timeline
+   */
+  getGameDebugState(): GameDebugState {
+    const boards: BoardDebugInfo[] = [];
+
+    for (const key in this.timelines) {
+      const tl = this.timelines[parseInt(key)];
+      boards.push(getTimelineDebugInfo(
+        tl,
+        tl.chess.in_checkmate(),
+        tl.chess.in_draw(),
+        tl.chess.in_check()
+      ));
+    }
+
+    return {
+      timestamp: new Date().toISOString(),
+      boards,
+      activeTimelineId: this.activeTimelineId,
+      totalTimelines: Object.keys(this.timelines).length,
+      globalGameOver: this.isGlobalGameOver(),
+    };
+  }
+
+  /**
+   * Log the current game state to console (useful for debugging)
+   */
+  logGameState(): void {
+    logGameState(this.getGameDebugState());
+  }
+
+  /**
+   * Get FEN for a specific timeline (for user debugging)
+   */
+  getTimelineFen(tlId: number): string | null {
+    const tl = this.timelines[tlId];
+    return tl ? tl.chess.fen() : null;
+  }
+
+  /**
+   * Copy FEN for active timeline to clipboard
+   */
+  async copyFenToClipboard(): Promise<boolean> {
+    const tl = this.timelines[this.activeTimelineId];
+    if (!tl) return false;
+
+    try {
+      await navigator.clipboard.writeText(tl.chess.fen());
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /* -- Reset -- */
