@@ -356,7 +356,16 @@ export class TimelineCol implements ITimelineCol {
     return { r: 8 - parseInt(sq[1]), c: sq.charCodeAt(0) - 97 };
   }
 
-  /** Type guard for checking if an Object3D is a main board piece sprite */
+  /**
+   * Type guard for checking if an Object3D is a main board piece sprite.
+   * Used to identify piece sprites that need cleanup during render(),
+   * distinguishing them from history layer sprites and UI elements.
+   *
+   * Criteria:
+   * - Must be a Sprite (not a Mesh or other Object3D)
+   * - Y position within 0.01 of MAIN_PIECE_Y (tolerance for floating point)
+   * - X/Z within board bounds (excludes file/rank labels at edges)
+   */
   private _isMainBoardSprite(obj: Object3D): obj is Sprite {
     if (!(obj as Sprite).isSprite) return false;
     if (Math.abs(obj.position.y - TimelineCol.MAIN_PIECE_Y) >= 0.01) return false;
@@ -1182,6 +1191,10 @@ class Board3DManager implements IBoard3D {
   private _currentFps = 0;
 
   // Performance: pooled scratch vectors (avoid GC churn)
+  // _tempVec3A: forward direction (camera panning), offset (rotation)
+  // _tempVec3B: right direction (camera panning)
+  // _tempVec3C: movement vector (camera panning)
+  // _tempVec3D: up reference vector (camera panning - avoids crossVectors self-reference)
   private _tempVec3A = new THREE.Vector3();
   private _tempVec3B = new THREE.Vector3();
   private _tempVec3C = new THREE.Vector3();
@@ -1931,6 +1944,9 @@ class Board3DManager implements IBoard3D {
       forward.y = 0;
       forward.normalize();
 
+      // IMPORTANT: Use separate 'up' vector for crossVectors() to avoid self-reference bug.
+      // crossVectors(a, b) modifies 'this' in-place while reading from a and b.
+      // If 'this' === b, the calculation corrupts mid-computation.
       const up = this._tempVec3D;
       up.set(0, 1, 0);
       const right = this._tempVec3B;
