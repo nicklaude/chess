@@ -174,22 +174,48 @@ export class TimelineCol implements ITimelineCol {
 
   /* render pieces on current board */
   render(position: Board): void {
-    // Remove and dispose of old piece sprites to prevent stacking and memory leaks
+    // CRITICAL: Synchronous cleanup of ALL piece sprites to prevent overlap/stacking
+    // Iterate backwards through group.children to safely remove sprites
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      // Check if this is a piece sprite (not board elements, labels, etc.)
+      if ((child as Sprite).isSprite && this._isMainBoardSprite(child as Sprite)) {
+        this.group.remove(child);
+        // Dispose of the sprite material to prevent memory leaks
+        if ((child as Sprite).material) {
+          ((child as Sprite).material as SpriteMaterial).dispose();
+        }
+      }
+    }
+    // Also clear our tracking array
     for (let i = 0; i < this.pieceMeshes.length; i++) {
       const sprite = this.pieceMeshes[i];
-      this.group.remove(sprite);
-      // Dispose of the sprite material to prevent memory leaks
-      // Note: We don't dispose of the texture since it's cached and shared
+      // Double-check removal (may already be removed above)
+      if (sprite.parent === this.group) {
+        this.group.remove(sprite);
+      }
       if (sprite.material) {
         (sprite.material as SpriteMaterial).dispose();
       }
     }
     this.pieceMeshes = [];
 
+    // Track positions to prevent duplicate sprites at same location
+    const occupiedPositions = new Set<string>();
+
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const piece = position[r][c];
         if (!piece) continue;
+
+        // Prevent duplicate sprites at same position
+        const posKey = `${r},${c}`;
+        if (occupiedPositions.has(posKey)) {
+          console.warn('[render] Duplicate piece detected at', posKey, '- skipping');
+          continue;
+        }
+        occupiedPositions.add(posKey);
+
         const isW = piece.color === 'w';
         const chKey = isW ? piece.type.toUpperCase() : piece.type;
         const tex = this._pieceTex(this._pieceChars[chKey], isW);
@@ -198,10 +224,20 @@ export class TimelineCol implements ITimelineCol {
         );
         sprite.position.set(c - 3.5, 0.22, r - 3.5);
         sprite.scale.set(0.88, 0.88, 0.88);
+        // Mark as main board sprite for identification during cleanup
+        sprite.userData.isMainBoardPiece = true;
         this.pieceMeshes.push(sprite);
         this.group.add(sprite);
       }
     }
+  }
+
+  /** Check if a sprite is a main board piece (not history/label/etc) */
+  private _isMainBoardSprite(sprite: Sprite): boolean {
+    // Check userData flag (new sprites) or position (legacy)
+    if (sprite.userData.isMainBoardPiece) return true;
+    // Fallback: main board pieces are at y=0.22, history pieces at lower y
+    return Math.abs(sprite.position.y - 0.22) < 0.01;
   }
 
   /* highlight / selection */
@@ -261,6 +297,110 @@ export class TimelineCol implements ITimelineCol {
     }
   }
 
+  /** CPU move preview - highlight source piece and show target with portal colors */
+  private cpuPreviewMeshes: Mesh[] = [];
+
+  showCpuMovePreview(from: string, to: string, isWhite: boolean, isTimeTravel: boolean = false): void {
+    this.clearCpuMovePreview();
+
+    const fromPos = this._fromSq(from);
+    const toPos = this._fromSq(to);
+    const color = isTimeTravel ? 0x44ffaa : (isWhite ? 0x88ccff : 0xffaa66);  // Cyan for time travel, blue/orange for normal
+
+    // Highlight source square with glowing ring
+    const sourceGeo = new THREE.RingGeometry(0.42, 0.52, 32);
+    const sourceMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const sourceRing = new THREE.Mesh(sourceGeo, sourceMat);
+    sourceRing.rotation.x = -Math.PI / 2;
+    sourceRing.position.set(fromPos.c - 3.5, 0.12, fromPos.r - 3.5);
+    this.group.add(sourceRing);
+    this.cpuPreviewMeshes.push(sourceRing);
+
+    // Source glow disc
+    const sourceGlowGeo = new THREE.CircleGeometry(0.45, 32);
+    const sourceGlowMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const sourceGlow = new THREE.Mesh(sourceGlowGeo, sourceGlowMat);
+    sourceGlow.rotation.x = -Math.PI / 2;
+    sourceGlow.position.set(fromPos.c - 3.5, 0.10, fromPos.r - 3.5);
+    this.group.add(sourceGlow);
+    this.cpuPreviewMeshes.push(sourceGlow);
+
+    // Target indicator (portal-style ring like cross-timeline targets)
+    const targetGeo = new THREE.RingGeometry(0.35, 0.48, 32);
+    const targetMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.75,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const targetRing = new THREE.Mesh(targetGeo, targetMat);
+    targetRing.rotation.x = -Math.PI / 2;
+    targetRing.position.set(toPos.c - 3.5, 0.09, toPos.r - 3.5);
+    this.group.add(targetRing);
+    this.cpuPreviewMeshes.push(targetRing);
+
+    // Target glow
+    const targetGlowGeo = new THREE.CircleGeometry(0.45, 32);
+    const targetGlowMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const targetGlow = new THREE.Mesh(targetGlowGeo, targetGlowMat);
+    targetGlow.rotation.x = -Math.PI / 2;
+    targetGlow.position.set(toPos.c - 3.5, 0.07, toPos.r - 3.5);
+    this.group.add(targetGlow);
+    this.cpuPreviewMeshes.push(targetGlow);
+
+    // Preview line connecting source to target
+    const fromWorld = new THREE.Vector3(fromPos.c - 3.5, 0.15, fromPos.r - 3.5);
+    const toWorld = new THREE.Vector3(toPos.c - 3.5, 0.15, toPos.r - 3.5);
+    const previewLine = Board3DManager._glowTube(fromWorld, toWorld, color, 0.02, 0.08, false, 0.6);
+    previewLine.userData.isCpuPreview = true;
+    this.group.add(previewLine);
+    // Store reference for cleanup (it's a Group, not Mesh, but we can still track it)
+    this.cpuPreviewMeshes.push(previewLine as unknown as Mesh);
+  }
+
+  clearCpuMovePreview(): void {
+    for (const mesh of this.cpuPreviewMeshes) {
+      this.group.remove(mesh);
+      // Dispose materials
+      if ((mesh as Mesh).material) {
+        const mat = (mesh as Mesh).material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          (mat as Material).dispose();
+        }
+      }
+      // If it's a Group (glow tube), traverse and dispose children
+      if ((mesh as unknown as Group).isGroup) {
+        (mesh as unknown as Group).traverse((child: Object3D) => {
+          if ((child as Mesh).material) {
+            ((child as Mesh).material as Material).dispose();
+          }
+        });
+      }
+    }
+    this.cpuPreviewMeshes = [];
+  }
+
   clearHighlights(): void {
     for (let i = 0; i < this.highlightMeshes.length; i++) {
       const h = this.highlightMeshes[i];
@@ -276,32 +416,34 @@ export class TimelineCol implements ITimelineCol {
     this.highlightMeshes = [];
   }
 
-  /* Cross-timeline movement indicators */
+  /* Cross-timeline movement indicators - large, visible, portal-style */
   showCrossTimelineTarget(sq: string, isCapture: boolean): void {
     const pos = this._fromSq(sq);
-    // Purple ring for cross-timeline targets (larger if capture)
-    const geo = isCapture
-      ? new THREE.RingGeometry(0.38, 0.48, 32)
-      : new THREE.RingGeometry(0.28, 0.38, 32);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xaa44ff,  // Purple for cross-timeline
+    const portalColor = 0xaa44ff;  // Purple for cross-timeline
+
+    // Large outer ring (portal-style) - MUCH bigger than before
+    const outerRingGeo = isCapture
+      ? new THREE.RingGeometry(0.42, 0.55, 32)
+      : new THREE.RingGeometry(0.35, 0.48, 32);
+    const outerRingMat = new THREE.MeshBasicMaterial({
+      color: portalColor,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.85,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const ind = new THREE.Mesh(geo, mat);
-    ind.rotation.x = -Math.PI / 2;
-    ind.position.set(pos.c - 3.5, 0.08, pos.r - 3.5);
-    this.group.add(ind);
-    this.crossTimelineTargets.push(ind);
+    const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.set(pos.c - 3.5, 0.09, pos.r - 3.5);
+    this.group.add(outerRing);
+    this.crossTimelineTargets.push(outerRing);
 
-    // Add pulsing glow effect
-    const glowGeo = new THREE.CircleGeometry(0.5, 32);
+    // Inner glow disc (larger, more visible)
+    const glowGeo = new THREE.CircleGeometry(0.55, 32);
     const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xaa44ff,
+      color: portalColor,
       transparent: true,
-      opacity: 0.2,
+      opacity: isCapture ? 0.35 : 0.25,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -310,13 +452,119 @@ export class TimelineCol implements ITimelineCol {
     glow.position.set(pos.c - 3.5, 0.07, pos.r - 3.5);
     this.group.add(glow);
     this.crossTimelineTargets.push(glow);
+
+    // Vertical beam above square (new - highly visible)
+    const beamGeo = new THREE.CylinderGeometry(0.08, 0.15, 1.2, 8);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: portalColor,
+      transparent: true,
+      opacity: 0.4,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.set(pos.c - 3.5, 0.7, pos.r - 3.5);
+    this.group.add(beam);
+    this.crossTimelineTargets.push(beam);
+
+    // Capture indicator (red-ish outer ring if capturing)
+    if (isCapture) {
+      const captureRingGeo = new THREE.RingGeometry(0.52, 0.58, 32);
+      const captureRingMat = new THREE.MeshBasicMaterial({
+        color: 0xff6666,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const captureRing = new THREE.Mesh(captureRingGeo, captureRingMat);
+      captureRing.rotation.x = -Math.PI / 2;
+      captureRing.position.set(pos.c - 3.5, 0.10, pos.r - 3.5);
+      this.group.add(captureRing);
+      this.crossTimelineTargets.push(captureRing);
+    }
   }
 
   clearCrossTimelineTargets(): void {
     for (const mesh of this.crossTimelineTargets) {
       this.group.remove(mesh);
+      // Dispose materials to prevent memory leaks
+      if ((mesh as Mesh).material) {
+        ((mesh as Mesh).material as Material).dispose();
+      }
     }
     this.crossTimelineTargets = [];
+    // Clear the board glow border
+    this._clearBoardGlowBorder();
+  }
+
+  /** Add a glowing border around the entire board to indicate it's a valid target */
+  showBoardGlowBorder(color: number = 0xaa44ff): void {
+    this._clearBoardGlowBorder();
+
+    // Create 4 edge beams around the board perimeter
+    const halfSize = 4.3;  // Board is ~8.6 wide
+    const beamHeight = 0.15;
+    const beamWidth = 0.08;
+
+    const edges = [
+      { pos: [0, beamHeight, -halfSize], rot: [0, 0, 0], len: halfSize * 2 },  // Front edge
+      { pos: [0, beamHeight, halfSize], rot: [0, 0, 0], len: halfSize * 2 },   // Back edge
+      { pos: [-halfSize, beamHeight, 0], rot: [0, Math.PI / 2, 0], len: halfSize * 2 }, // Left edge
+      { pos: [halfSize, beamHeight, 0], rot: [0, Math.PI / 2, 0], len: halfSize * 2 },  // Right edge
+    ];
+
+    for (const edge of edges) {
+      const geo = new THREE.BoxGeometry(edge.len, beamWidth, beamWidth);
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const beam = new THREE.Mesh(geo, mat);
+      beam.position.set(edge.pos[0], edge.pos[1], edge.pos[2]);
+      beam.rotation.set(edge.rot[0], edge.rot[1], edge.rot[2]);
+      beam.userData.isBoardGlowBorder = true;
+      this.group.add(beam);
+    }
+
+    // Add corner glow spheres
+    const corners = [
+      [-halfSize, beamHeight, -halfSize],
+      [halfSize, beamHeight, -halfSize],
+      [-halfSize, beamHeight, halfSize],
+      [halfSize, beamHeight, halfSize],
+    ];
+
+    for (const corner of corners) {
+      const geo = new THREE.SphereGeometry(0.12, 8, 8);
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const sphere = new THREE.Mesh(geo, mat);
+      sphere.position.set(corner[0], corner[1], corner[2]);
+      sphere.userData.isBoardGlowBorder = true;
+      this.group.add(sphere);
+    }
+  }
+
+  /** Clear the board glow border */
+  private _clearBoardGlowBorder(): void {
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if (child.userData.isBoardGlowBorder) {
+        this.group.remove(child);
+        if ((child as Mesh).material) {
+          ((child as Mesh).material as Material).dispose();
+        }
+      }
+    }
   }
 
   /* Time travel target indicators (on history layers) */
@@ -629,11 +877,44 @@ export class TimelineCol implements ITimelineCol {
     }
   }
 
+  /** Validate no duplicate sprites exist at same position (debug helper) */
+  validateNoDuplicates(): void {
+    const positions = new Map<string, number>();
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if ((child as Sprite).isSprite && this._isMainBoardSprite(child as Sprite)) {
+        const key = `${child.position.x.toFixed(1)},${child.position.z.toFixed(1)}`;
+        const count = positions.get(key) || 0;
+        positions.set(key, count + 1);
+        if (count > 0) {
+          console.error('[validateNoDuplicates] DUPLICATE SPRITE at', key, '- removing');
+          this.group.remove(child);
+          if ((child as Sprite).material) {
+            ((child as Sprite).material as SpriteMaterial).dispose();
+          }
+        }
+      }
+    }
+  }
+
   clearAll(): void {
-    // Clear and dispose of piece sprites to prevent stacking
+    // CRITICAL: Synchronous cleanup of ALL sprites from group.children
+    // Iterate backwards to safely remove during iteration
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if ((child as Sprite).isSprite && this._isMainBoardSprite(child as Sprite)) {
+        this.group.remove(child);
+        if ((child as Sprite).material) {
+          ((child as Sprite).material as SpriteMaterial).dispose();
+        }
+      }
+    }
+    // Also clear tracking array
     for (let i = 0; i < this.pieceMeshes.length; i++) {
       const sprite = this.pieceMeshes[i];
-      this.group.remove(sprite);
+      if (sprite.parent === this.group) {
+        this.group.remove(sprite);
+      }
       if (sprite.material) {
         (sprite.material as SpriteMaterial).dispose();
       }

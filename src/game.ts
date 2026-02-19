@@ -1042,6 +1042,11 @@ timelines - list timelines`,
     this.clearSelection();
     this.renderTimeline(sourceTimelineId);
     this.renderTimeline(targetTimelineId);
+
+    // Validate no duplicate sprites after cross-timeline move
+    if (sourceCol) sourceCol.validateNoDuplicates();
+    if (targetCol) targetCol.validateNoDuplicates();
+
     this.updateStatus();
     this.updateMoveList();
     this.updateTimelineList();
@@ -1285,6 +1290,11 @@ timelines - list timelines`,
     this.setActiveTimeline(newId, shouldFocus);
     this.renderTimeline(sourceTimelineId);
     this.renderTimeline(newId);
+
+    // Validate no duplicate sprites after time travel
+    if (sourceCol) sourceCol.validateNoDuplicates();
+    if (newCol) newCol.validateNoDuplicates();
+
     this.updateTimelineList();
     this._updateMoveSlider();
 
@@ -1519,10 +1529,24 @@ timelines - list timelines`,
 
   /** Show cross-timeline target indicators in other timelines */
   private _showCrossTimelineTargets(targets: CrossTimelineMoveTarget[]): void {
+    // Group targets by timeline to show board glow border
+    const targetsByTimeline = new Map<number, CrossTimelineMoveTarget[]>();
     for (const target of targets) {
-      const col = Board3D.getTimeline(target.targetTimelineId);
+      const existing = targetsByTimeline.get(target.targetTimelineId) || [];
+      existing.push(target);
+      targetsByTimeline.set(target.targetTimelineId, existing);
+    }
+
+    // Show indicators and board glow for each target timeline
+    for (const [tlId, tlTargets] of targetsByTimeline) {
+      const col = Board3D.getTimeline(tlId);
       if (col) {
-        col.showCrossTimelineTarget(target.targetSquare, target.isCapture);
+        // Show glowing border around the entire board
+        col.showBoardGlowBorder(0xaa44ff);  // Purple for cross-timeline
+        // Show individual square targets
+        for (const target of tlTargets) {
+          col.showCrossTimelineTarget(target.targetSquare, target.isCapture);
+        }
       }
     }
   }
@@ -2056,7 +2080,11 @@ timelines - list timelines`,
     return playable;
   }
 
-  /** Make a CPU move on the given timeline */
+  // CPU preview state
+  private cpuPreviewActive = false;
+  private cpuPendingMove: { tlId: number; move: ChessMove; isTimeTravel: boolean; timeTravelData?: { sourceSquare: Square; targetTurnIndex: number; piece: Piece; capturedPiece: Piece | null | undefined } } | null = null;
+
+  /** Make a CPU move on the given timeline (with preview pause) */
   private _cpuMakeMove(tlId: number): boolean {
     const tl = this.timelines[tlId];
     if (!tl) return false;
@@ -2078,15 +2106,27 @@ timelines - list timelines`,
     if (Object.keys(this.timelines).length < this.maxTimelines) {
       const timeTravelMove = this._cpuCheckTimeTravel(tlId);
       if (timeTravelMove) {
-        // Execute time travel move!
-        console.log('[CPU] Time traveling!', { color: isWhite ? 'white' : 'black', timeline: tlId });
-        this._makeTimeTravelMove(
+        // Show preview for time travel move
+        const col = Board3D.getTimeline(tlId);
+        if (col) {
+          col.showCpuMovePreview(timeTravelMove.sourceSquare, timeTravelMove.sourceSquare, isWhite, true);
+        }
+
+        // Store pending move and execute after tiny pause
+        this.cpuPendingMove = {
           tlId,
-          timeTravelMove.sourceSquare,
-          timeTravelMove.targetTurnIndex,
-          timeTravelMove.piece,
-          timeTravelMove.isCapture ? timeTravelMove.capturedPiece : null
-        );
+          move: { from: timeTravelMove.sourceSquare, to: timeTravelMove.sourceSquare } as ChessMove,
+          isTimeTravel: true,
+          timeTravelData: {
+            sourceSquare: timeTravelMove.sourceSquare,
+            targetTurnIndex: timeTravelMove.targetTurnIndex,
+            piece: timeTravelMove.piece,
+            capturedPiece: timeTravelMove.isCapture ? timeTravelMove.capturedPiece : null,
+          },
+        };
+
+        // Execute after preview delay (300ms)
+        window.setTimeout(() => this._cpuExecutePendingMove(), 300);
         return true;
       }
     }
@@ -2101,9 +2141,46 @@ timelines - list timelines`,
       move = moves[Math.floor(Math.random() * moves.length)];
     }
 
-    // Execute the move (auto-queen for CPU promotions)
-    this.makeMove(tlId, move, move.promotion ? 'q' : undefined);
+    // Show preview before executing
+    const col = Board3D.getTimeline(tlId);
+    if (col) {
+      col.showCpuMovePreview(move.from, move.to, isWhite, false);
+    }
+
+    // Store pending move and execute after tiny pause (200ms for normal moves)
+    this.cpuPendingMove = { tlId, move, isTimeTravel: false };
+
+    window.setTimeout(() => this._cpuExecutePendingMove(), 200);
     return true;
+  }
+
+  /** Execute the pending CPU move after preview delay */
+  private _cpuExecutePendingMove(): void {
+    if (!this.cpuPendingMove) return;
+
+    const { tlId, move, isTimeTravel, timeTravelData } = this.cpuPendingMove;
+    this.cpuPendingMove = null;
+
+    // Clear the preview
+    const col = Board3D.getTimeline(tlId);
+    if (col) {
+      col.clearCpuMovePreview();
+    }
+
+    if (isTimeTravel && timeTravelData) {
+      // Execute time travel move
+      console.log('[CPU] Time traveling!', { timeline: tlId });
+      this._makeTimeTravelMove(
+        tlId,
+        timeTravelData.sourceSquare,
+        timeTravelData.targetTurnIndex,
+        timeTravelData.piece,
+        timeTravelData.capturedPiece
+      );
+    } else {
+      // Execute normal move (auto-queen for CPU promotions)
+      this.makeMove(tlId, move, move.promotion ? 'q' : undefined);
+    }
   }
 
   /** Check if CPU has a time travel opportunity on this timeline */
