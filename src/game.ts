@@ -735,6 +735,13 @@ timelines - list timelines`,
 
   /* -- Click handling -- */
   handleClick(info: SquareClickInfo): void {
+    // RACE CONDITION PREVENTION: Ignore clicks while CPU move is pending execution
+    // This prevents user interaction from interfering with the pending move's render cycle
+    if (this.cpuPendingMove) {
+      console.log('[handleClick] Ignoring click - CPU move pending');
+      return;
+    }
+
     const tlId = info.timelineId;
     const sq = info.square;
     const isHistory = info.isHistory;
@@ -1013,6 +1020,12 @@ timelines - list timelines`,
   makeMove(tlId: number, move: ChessMove, promotionPiece?: PieceType): void {
     const tl = this.timelines[tlId];
     if (!tl) return;
+
+    // Clear history viewing mode when a move is made - ensures render uses current state
+    if (this.viewingMoveIndex !== null && tlId === this.activeTimelineId) {
+      this.viewingMoveIndex = null;
+    }
+
     const chess = tl.chess;
     const isWhite = chess.turn() === 'w';
 
@@ -1402,11 +1415,12 @@ timelines - list timelines`,
 
     // Validate no duplicate sprites after cross-timeline renders
     // This catches edge cases where sprites weren't properly cleaned up
+    // Pass current board state so we can do a full rebuild if needed
     if (sourceCol) {
-      sourceCol.validateNoDuplicates();
+      sourceCol.validateNoDuplicates(sourceTl.chess.board());
     }
     if (targetCol) {
-      targetCol.validateNoDuplicates();
+      targetCol.validateNoDuplicates(targetTl.chess.board());
     }
 
     console.log('[crossTimeline] VISUAL_TRAILS_DEBUG: Render complete', {
@@ -1757,12 +1771,13 @@ timelines - list timelines`,
     this.renderTimeline(newId);
 
     // Validate no duplicate sprites after time travel renders
+    // Pass current board state so we can do a full rebuild if needed
     // (sourceCol and newCol are already declared earlier in this function)
     if (sourceCol) {
-      sourceCol.validateNoDuplicates();
+      sourceCol.validateNoDuplicates(sourceTl.chess.board());
     }
     if (newCol) {
-      newCol.validateNoDuplicates();
+      newCol.validateNoDuplicates(newTl.chess.board());
     }
 
     console.log('[Time Travel] VISUAL_TRAILS_DEBUG: Render complete', {
@@ -2605,10 +2620,14 @@ timelines - list timelines`,
   private _cpuTick(): void {
     if (!this.cpuEnabled) return;
 
-    // RACE CONDITION PREVENTION: If a move is already in progress, skip this tick
+    // RACE CONDITION PREVENTION: If a move is already in progress OR pending, skip this tick
     // This prevents overlapping move execution when setTimeout callbacks fire during long operations
-    if (this.cpuMoveInProgress) {
-      console.log('[CPU] Move in progress, skipping tick');
+    // BUG FIX: Also check cpuPendingMove - a move might be scheduled but not yet executed
+    if (this.cpuMoveInProgress || this.cpuPendingMove) {
+      console.log('[CPU] Move in progress or pending, skipping tick', {
+        inProgress: this.cpuMoveInProgress,
+        pending: !!this.cpuPendingMove,
+      });
       this.cpuTimer = window.setTimeout(() => this._cpuTick(), this.cpuMoveDelay);
       return;
     }

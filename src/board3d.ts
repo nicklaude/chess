@@ -463,6 +463,8 @@ export class TimelineCol implements ITimelineCol {
   private _prevBoardState: Map<string, string> = new Map();
   // Map sprite position key to the sprite at that position for efficient updates
   private _spriteMap: Map<string, Sprite> = new Map();
+  // Debug: track if render is currently executing to detect reentrant calls
+  private _renderInProgress = false;
 
   constructor(
     scene: Scene,
@@ -604,6 +606,28 @@ export class TimelineCol implements ITimelineCol {
   render(position: Board): void {
     const timestamp = Date.now();
 
+    // REENTRANT CALL DETECTION: Catch overlapping render calls that could cause duplicates
+    if (this._renderInProgress) {
+      console.error(`[Board3D.render] REENTRANT_CALL_BUG: render() called while already executing!`, {
+        timeline: this.id,
+        timestamp,
+        stack: new Error().stack,
+      });
+      // Don't return - still try to render, but log the error
+    }
+    this._renderInProgress = true;
+
+    // DEBUG: Log render entry with stack trace to identify caller
+    if (Board3DManager.DEBUG_MODE) {
+      const stackLines = new Error().stack?.split('\n').slice(1, 5).join('\n') || '';
+      console.log(`[Board3D.render] ENTRY timeline=${this.id} ts=${timestamp}`, {
+        prevStateSize: this._prevBoardState.size,
+        spriteMapSize: this._spriteMap.size,
+        pieceMeshesCount: this.pieceMeshes.length,
+        caller: stackLines,
+      });
+    }
+
     // Build new board state map for comparison
     const newBoardState = new Map<string, string>();
     for (let r = 0; r < 8; r++) {
@@ -639,7 +663,21 @@ export class TimelineCol implements ITimelineCol {
 
     // PERFORMANCE: Skip if nothing changed
     if (toRemove.length === 0 && toAdd.length === 0 && this._prevBoardState.size === newBoardState.size) {
+      if (Board3DManager.DEBUG_MODE) {
+        console.log(`[Board3D.render] SKIP (no changes) timeline=${this.id}`);
+      }
+      this._renderInProgress = false;  // Reset flag on early return
       return;
+    }
+
+    // DEBUG: Log what's changing
+    if (Board3DManager.DEBUG_MODE) {
+      console.log(`[Board3D.render] CHANGES timeline=${this.id}`, {
+        toRemove,
+        toAdd,
+        prevSize: this._prevBoardState.size,
+        newSize: newBoardState.size,
+      });
     }
 
     // Remove sprites for positions that changed or are now empty
@@ -693,6 +731,26 @@ export class TimelineCol implements ITimelineCol {
       const sprite = spritePool.acquire(material);
       sprite.position.set(c - 3.5, TimelineCol.MAIN_PIECE_Y, r - 3.5);
       sprite.scale.set(0.88, 0.88, 0.88);
+
+      // DEBUG: Check if any sprite already exists at this position in the scene BEFORE adding
+      if (Board3DManager.DEBUG_MODE) {
+        let existingCount = 0;
+        for (const child of this.group.children) {
+          if (this._isMainBoardSprite(child as Object3D)) {
+            const childCol = Math.round((child as Object3D).position.x + 3.5);
+            const childRow = Math.round((child as Object3D).position.z + 3.5);
+            if (childRow === r && childCol === c) {
+              existingCount++;
+              console.error(`[Board3D.render] DUPLICATE_CREATION: About to add sprite at ${posKey} but ${existingCount} already exists!`, {
+                timeline: this.id,
+                existingChild: child,
+                newSprite: sprite,
+              });
+            }
+          }
+        }
+      }
+
       this.group.add(sprite);
       this.pieceMeshes.push(sprite);
       this._spriteMap.set(posKey, sprite);
@@ -717,6 +775,11 @@ export class TimelineCol implements ITimelineCol {
         const mapSprite = this._spriteMap.get(posKey);
         if (!mapSprite || mapSprite !== child) {
           // Either position not in map, or a different sprite is canonical - this is orphaned
+          console.warn(`[Board3D.render] ORPHAN_CLEANUP timeline=${this.id} posKey=${posKey}`, {
+            hasMapSprite: !!mapSprite,
+            isSameSprite: mapSprite === child,
+            childY: child.position.y,
+          });
           this.group.remove(child);
           spritePool.release(child as PooledSprite);
           // Also remove from pieceMeshes if present
@@ -773,6 +836,9 @@ export class TimelineCol implements ITimelineCol {
         });
       }
     }
+
+    // Reset reentrant flag at end of render
+    this._renderInProgress = false;
   }
 
   /**
@@ -786,10 +852,11 @@ export class TimelineCol implements ITimelineCol {
    * - _spriteMap (updates to point to the kept sprite)
    * - Returns duplicates to spritePool for reuse
    *
+   * @param currentBoard Optional - if provided and duplicates found, will do a full rebuild
    * @returns true if no duplicates were found (validation passed),
    *          false if duplicates were detected and auto-fixed
    */
-  validateNoDuplicates(): boolean {
+  validateNoDuplicates(currentBoard?: Board): boolean {
     const timestamp = Date.now();
     const positionMap = new Map<string, { sprite: Sprite; pieceInfo: string; boardPosKey: string }[]>();
 
@@ -816,8 +883,9 @@ export class TimelineCol implements ITimelineCol {
       }
     }
 
-    // Second pass: identify duplicates and remove extras
+    // Second pass: identify duplicates
     let foundDuplicates = false;
+    const duplicateInfo: string[] = [];
     positionMap.forEach((sprites, posKey) => {
       if (sprites.length > 1) {
         foundDuplicates = true;
@@ -835,38 +903,76 @@ export class TimelineCol implements ITimelineCol {
           square = `invalid(col=${col},row=${row})`;
         }
 
-        console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites detected and auto-fixed!', {
-          timeline: this.id,
-          timestamp,
-          square,
-          position: posKey,
-          duplicateCount: sprites.length,
-          pieceTypes: sprites.map(s => s.pieceInfo),
-        });
-
-        // Keep the first sprite, update _spriteMap to point to it
-        const keptSprite = sprites[0].sprite;
-        const boardPosKey = sprites[0].boardPosKey;
-        this._spriteMap.set(boardPosKey, keptSprite);
-
-        // Remove the duplicate sprites (all but the first)
-        for (let i = 1; i < sprites.length; i++) {
-          const spriteEntry = sprites[i];
-          if (spriteEntry && spriteEntry.sprite) {
-            // Remove from pieceMeshes array
-            const pieceMeshIdx = this.pieceMeshes.indexOf(spriteEntry.sprite);
-            if (pieceMeshIdx !== -1) {
-              this.pieceMeshes.splice(pieceMeshIdx, 1);
-            }
-
-            // Return to sprite pool (handles removal from parent and disposal)
-            spritePool.release(spriteEntry.sprite as PooledSprite);
-          }
-        }
+        duplicateInfo.push(`${square}: ${sprites.length} sprites (${sprites.map(s => s.pieceInfo).join(', ')})`);
       }
     });
 
+    if (foundDuplicates) {
+      console.error('[Board3D] PIECE_OVERLAP_BUG: Duplicate sprites detected!', {
+        timeline: this.id,
+        timestamp,
+        duplicates: duplicateInfo,
+      });
+
+      // If we have the current board state, do a complete rebuild instead of trying to fix in place
+      if (currentBoard) {
+        console.warn('[Board3D] Performing full rebuild to fix duplicates');
+        this.forceFullRebuild(currentBoard);
+        return false;
+      }
+
+      // Otherwise, try to fix in place (legacy behavior)
+      positionMap.forEach((sprites, posKey) => {
+        if (sprites.length > 1) {
+          // Keep the first sprite, update _spriteMap to point to it
+          const keptSprite = sprites[0].sprite;
+          const boardPosKey = sprites[0].boardPosKey;
+          this._spriteMap.set(boardPosKey, keptSprite);
+
+          // Remove the duplicate sprites (all but the first)
+          for (let i = 1; i < sprites.length; i++) {
+            const spriteEntry = sprites[i];
+            if (spriteEntry && spriteEntry.sprite) {
+              // Remove from pieceMeshes array
+              const pieceMeshIdx = this.pieceMeshes.indexOf(spriteEntry.sprite);
+              if (pieceMeshIdx !== -1) {
+                this.pieceMeshes.splice(pieceMeshIdx, 1);
+              }
+
+              // Return to sprite pool (handles removal from parent and disposal)
+              spritePool.release(spriteEntry.sprite as PooledSprite);
+            }
+          }
+        }
+      });
+    }
+
     return !foundDuplicates;
+  }
+
+  /**
+   * Force a complete rebuild of all piece sprites.
+   * This is a nuclear option for when state gets out of sync.
+   * Clears all existing sprites and re-renders from scratch.
+   */
+  forceFullRebuild(position: Board): void {
+    console.warn(`[Board3D] FORCE_REBUILD timeline=${this.id} - clearing all state and re-rendering`);
+
+    // Clear all piece sprites - return to pool
+    for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
+      const sprite = this.pieceMeshes[i] as PooledSprite;
+      spritePool.release(sprite);
+    }
+    this.pieceMeshes.length = 0;
+
+    // Clear tracking state
+    this._prevBoardState.clear();
+    this._spriteMap.clear();
+
+    // Now render from scratch
+    this.render(position);
+
+    console.warn(`[Board3D] FORCE_REBUILD complete - now have ${this.pieceMeshes.length} sprites`);
   }
 
   /* highlight / selection */
@@ -1633,7 +1739,7 @@ class Board3DManager implements IBoard3D {
   private static readonly PARTICLE_ANIM_INTERVAL = 3;  // Update every 3 frames
 
   // Debug mode: disable validation traversals in production
-  static DEBUG_MODE = false;  // Set to true for debugging piece overlap issues
+  static DEBUG_MODE = true;  // Set to true for debugging piece overlap issues
 
   // Performance: pooled scratch vectors (avoid GC churn from frequent allocations)
   // These are reused across frames in _updatePanning() for camera movement calculations.
