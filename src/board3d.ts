@@ -614,6 +614,38 @@ export class TimelineCol implements ITimelineCol {
   render(position: Board): void {
     const timestamp = Date.now();
 
+    // ALWAYS LOG: Count pieces and sprites to help debug ghost piece issues
+    let positionPieceCount = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (position[r][c]) positionPieceCount++;
+      }
+    }
+
+    // Count sprites currently in the scene at MAIN_PIECE_Y
+    let sceneMainSprites = 0;
+    for (let i = 0; i < this.group.children.length; i++) {
+      const child = this.group.children[i];
+      if (this._isMainBoardSprite(child)) {
+        sceneMainSprites++;
+      }
+    }
+
+    console.log(`[Board3D.render] tl=${this.id} pos=${positionPieceCount} prev=${this._prevBoardState.size} map=${this._spriteMap.size} meshes=${this.pieceMeshes.length} scene=${sceneMainSprites}`);
+
+    // GHOST PIECE DETECTION: If scene has more sprites than position has pieces, we have ghosts!
+    if (sceneMainSprites > positionPieceCount) {
+      console.error(`[Board3D.render] GHOST_PIECE_BUG: Scene has ${sceneMainSprites} sprites but position only has ${positionPieceCount} pieces!`, {
+        timeline: this.id,
+        timestamp,
+        sceneSprites: sceneMainSprites,
+        positionPieces: positionPieceCount,
+        prevState: this._prevBoardState.size,
+        spriteMap: this._spriteMap.size,
+        pieceMeshes: this.pieceMeshes.length,
+      });
+    }
+
     // REENTRANT CALL DETECTION: Catch overlapping render calls that could cause duplicates
     if (this._renderInProgress) {
       console.error(`[Board3D.render] REENTRANT_CALL_BUG: render() called while already executing!`, {
@@ -692,6 +724,9 @@ export class TimelineCol implements ITimelineCol {
     for (const posKey of toRemove) {
       const sprite = this._spriteMap.get(posKey) as PooledSprite | undefined;
       if (sprite) {
+        // ALWAYS LOG: Track removal to debug ghost pieces
+        console.log(`[Board3D.render] REMOVING sprite at ${posKey} tl=${this.id}`);
+
         // Return to pool for reuse
         spritePool.release(sprite);
         this._spriteMap.delete(posKey);
@@ -700,6 +735,14 @@ export class TimelineCol implements ITimelineCol {
         if (idx !== -1) {
           this.pieceMeshes.splice(idx, 1);
         }
+      } else {
+        // GHOST BUG INDICATOR: We wanted to remove a sprite at posKey but it's not in our map!
+        // This means the map is out of sync with what's in the scene
+        console.error(`[Board3D.render] GHOST_BUG: Wanted to remove sprite at ${posKey} but not found in _spriteMap! tl=${this.id}`, {
+          posKey,
+          prevState: this._prevBoardState.get(posKey),
+          spriteMapSize: this._spriteMap.size,
+        });
       }
     }
 

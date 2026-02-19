@@ -36,6 +36,21 @@ interface Timeline {
   branchPoint: number;
 }
 
+// ===============================================================
+// Simulated Render State (mimics board3d.ts render logic)
+// ===============================================================
+
+interface SimulatedSprite {
+  posKey: string;  // "row,col"
+  pieceKey: string;  // "type,color"
+}
+
+interface SimulatedRenderState {
+  spriteMap: Map<string, SimulatedSprite>;  // posKey -> sprite
+  prevBoardState: Map<string, string>;  // posKey -> pieceKey
+  ghostCount: number;  // times we've detected ghost pieces
+}
+
 interface GameState {
   timelines: Record<number, Timeline>;
   nextTimelineId: number;
@@ -53,6 +68,8 @@ interface TestResult {
     capturesMade: number;
     timeTravelMoves: number;
     crossTimelineMoves: number;
+    ghostPiecesDetected: number;  // NEW: Track ghost piece rendering bugs
+    renderCalls: number;  // NEW: Track render calls
   };
   finalState: {
     timelines: number;
@@ -70,6 +87,9 @@ class HeadlessGame {
   private errors: string[] = [];
   private warnings: string[] = [];
 
+  // Simulated render state per timeline (mimics board3d.ts)
+  private renderStates: Map<number, SimulatedRenderState> = new Map();
+
   // Stats
   private stats = {
     totalMoves: 0,
@@ -77,6 +97,8 @@ class HeadlessGame {
     capturesMade: 0,
     timeTravelMoves: 0,
     crossTimelineMoves: 0,
+    ghostPiecesDetected: 0,  // NEW: Track ghost piece bugs
+    renderCalls: 0,  // NEW: Track render calls
   };
 
   constructor() {
@@ -87,6 +109,113 @@ class HeadlessGame {
       globalTurn: 'w',
     };
     this._createTimeline(0, null, -1, null);
+  }
+
+  /**
+   * Simulates the render() function from board3d.ts
+   * Uses the same diff-based logic to detect ghost pieces
+   */
+  private simulateRender(tlId: number): void {
+    const tl = this.state.timelines[tlId];
+    if (!tl) return;
+
+    this.stats.renderCalls++;
+
+    // Get or create render state for this timeline
+    let renderState = this.renderStates.get(tlId);
+    if (!renderState) {
+      renderState = {
+        spriteMap: new Map(),
+        prevBoardState: new Map(),
+        ghostCount: 0,
+      };
+      this.renderStates.set(tlId, renderState);
+    }
+
+    const board = tl.chess.board();
+
+    // Count pieces in the current position
+    let positionPieceCount = 0;
+
+    // Build new board state map (same as board3d.ts render)
+    const newBoardState = new Map<string, string>();
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = board[r][c];
+        if (piece) {
+          positionPieceCount++;
+          const posKey = `${r},${c}`;
+          const pieceKey = `${piece.type},${piece.color}`;
+          newBoardState.set(posKey, pieceKey);
+        }
+      }
+    }
+
+    // Find what changed (same as board3d.ts render)
+    const toRemove: string[] = [];
+    const toAdd: string[] = [];
+
+    // Check old positions - what was removed or changed
+    renderState.prevBoardState.forEach((pieceKey, posKey) => {
+      const newPieceKey = newBoardState.get(posKey);
+      if (!newPieceKey || newPieceKey !== pieceKey) {
+        toRemove.push(posKey);
+      }
+    });
+
+    // Check new positions - what was added or changed
+    newBoardState.forEach((pieceKey, posKey) => {
+      const oldPieceKey = renderState!.prevBoardState.get(posKey);
+      if (!oldPieceKey || oldPieceKey !== pieceKey) {
+        toAdd.push(posKey);
+      }
+    });
+
+    // Simulate sprite removal (same as board3d.ts)
+    for (const posKey of toRemove) {
+      const sprite = renderState.spriteMap.get(posKey);
+      if (sprite) {
+        renderState.spriteMap.delete(posKey);
+      } else {
+        // GHOST BUG INDICATOR: Position is in prevBoardState but no sprite in map
+        this.stats.ghostPiecesDetected++;
+        this.error(`Timeline ${tlId}: GHOST BUG! Wanted to remove sprite at ${posKey} but not found in spriteMap!`);
+      }
+    }
+
+    // Simulate sprite addition (same as board3d.ts)
+    for (const posKey of toAdd) {
+      const pieceKey = newBoardState.get(posKey);
+      if (pieceKey) {
+        renderState.spriteMap.set(posKey, { posKey, pieceKey });
+      }
+    }
+
+    // Update prev state for next render
+    renderState.prevBoardState = newBoardState;
+
+    // GHOST PIECE DETECTION: After render, spriteMap size should match piece count
+    if (renderState.spriteMap.size !== positionPieceCount) {
+      this.stats.ghostPiecesDetected++;
+
+      // Find the ghost pieces (in spriteMap but not in position)
+      const ghosts: string[] = [];
+      renderState.spriteMap.forEach((sprite, posKey) => {
+        if (!newBoardState.has(posKey)) {
+          ghosts.push(`${posKey} (${sprite.pieceKey})`);
+        }
+      });
+
+      // Find missing sprites (in position but not in spriteMap)
+      const missing: string[] = [];
+      newBoardState.forEach((pieceKey, posKey) => {
+        if (!renderState!.spriteMap.has(posKey)) {
+          missing.push(`${posKey} (${pieceKey})`);
+        }
+      });
+
+      this.error(`Timeline ${tlId}: RENDER MISMATCH! spriteMap=${renderState.spriteMap.size} position=${positionPieceCount}. Ghosts: [${ghosts.join(', ')}] Missing: [${missing.join(', ')}]`);
+    }
   }
 
   private log(msg: string): void {
@@ -220,6 +349,9 @@ class HeadlessGame {
       });
       tl.snapshots.push(this._cloneBoard(chess));
 
+      // Simulate render after move (like real game does)
+      this.simulateRender(tlId);
+
       return true;
     }
 
@@ -323,6 +455,11 @@ class HeadlessGame {
     });
 
     this.stats.timeTravelMoves++;
+
+    // Simulate render for both timelines after time travel
+    this.simulateRender(tlId);
+    this.simulateRender(newId);
+
     return true;
   }
 
@@ -394,6 +531,11 @@ class HeadlessGame {
     targetTl.snapshots.push(this._cloneBoard(targetChess));
 
     this.stats.crossTimelineMoves++;
+
+    // Simulate render for both timelines after cross-timeline move
+    this.simulateRender(sourceTlId);
+    this.simulateRender(targetTlId);
+
     return true;
   }
 
