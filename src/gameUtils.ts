@@ -194,11 +194,13 @@ export function modifyFen(options: ModifyFenOptions): string {
 
   // Update castling rights
   if (parts.castling !== '-') {
-    // If a piece is being removed, check if it affects castling
-    if (!newPiece && oldPieceChar) {
+    // If a piece is being removed (either emptying square or capturing via replacement),
+    // check if the removed piece affects castling (e.g., rook on h1 captured by cross-timeline move)
+    if (oldPieceChar) {
       parts.castling = updateCastlingForRemoval(parts.castling, square, oldPieceChar);
     }
     // If a piece is being placed, check if it affects castling
+    // (this handles cases where a non-rook piece moves to a rook starting square)
     if (newPiece) {
       parts.castling = updateCastlingForPlacement(parts.castling, square);
     }
@@ -444,4 +446,71 @@ export function validateKings(fen: string): { valid: boolean; whiteKings: number
     whiteKings,
     blackKings,
   };
+}
+
+/**
+ * Validate that after FEN modification, the side that JUST MOVED
+ * does NOT have their own king in check. This catches illegal teleport
+ * positions where a piece teleports away and leaves its own king exposed,
+ * or lands in a way that exposes its own king.
+ *
+ * @param fen - The FEN string to validate (AFTER turn has been flipped)
+ * @param movingPlayerColor - The color of the player who just moved ('w' or 'b')
+ * @returns Object with valid boolean and optional reason string
+ *
+ * Note: Uses the global Chess constructor (from chess.js CDN)
+ * The check is performed by:
+ * 1. Loading the FEN into a temporary chess instance
+ * 2. Temporarily switching the turn to the moving player
+ * 3. Checking if they are in check (meaning their king is under attack)
+ * 4. If so, the teleport was illegal - you can't leave your king in check
+ *
+ * IMPORTANT: The FEN passed in should already have the turn flipped
+ * (i.e., it's now the opponent's turn). We flip it back temporarily
+ * to check if the player who just moved left their king in check.
+ */
+export function validateNoSelfCheck(
+  fen: string,
+  movingPlayerColor: 'w' | 'b'
+): { valid: boolean; reason?: string } {
+  // Create a temporary chess instance to check the position
+  const tempChess = new Chess();
+  const loaded = tempChess.load(fen);
+
+  if (!loaded) {
+    return {
+      valid: false,
+      reason: `Invalid FEN: could not load "${fen}"`,
+    };
+  }
+
+  // The FEN has the turn set to the opponent (after the move).
+  // We need to temporarily flip the turn back to check if the
+  // player who just moved left their own king in check.
+  const fenParts = fen.split(' ');
+  fenParts[1] = movingPlayerColor;
+  const fenWithMovingPlayerTurn = fenParts.join(' ');
+
+  const checkChess = new Chess();
+  const checkLoaded = checkChess.load(fenWithMovingPlayerTurn);
+
+  if (!checkLoaded) {
+    // This shouldn't happen if the original FEN was valid
+    return {
+      valid: false,
+      reason: `Invalid FEN after turn flip: could not load "${fenWithMovingPlayerTurn}"`,
+    };
+  }
+
+  // Now check if the moving player's king is in check
+  // This would mean they made an illegal move (left their king in check)
+  if (checkChess.in_check()) {
+    const playerName = movingPlayerColor === 'w' ? 'White' : 'Black';
+    return {
+      valid: false,
+      reason: `Illegal move: ${playerName}'s king would be in check after teleport`,
+    };
+  }
+
+  return { valid: true };
 }

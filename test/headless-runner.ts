@@ -448,18 +448,31 @@ class HeadlessGame {
 
     // Update castling rights
     let castling = parts[2] || '-';
-    if (castling !== '-' && !newPiece && oldPieceChar) {
-      const removedPiece = oldPieceChar.toLowerCase();
-      const isWhitePiece = oldPieceChar === oldPieceChar.toUpperCase();
-      if (removedPiece === 'k') {
-        castling = isWhitePiece ? castling.replace(/[KQ]/g, '') : castling.replace(/[kq]/g, '');
-      } else if (removedPiece === 'r') {
+    if (castling !== '-') {
+      // If a piece is being removed (either emptying square or capturing via replacement),
+      // check if the removed piece affects castling (e.g., rook on h1 captured by cross-timeline move)
+      if (oldPieceChar) {
+        const removedPiece = oldPieceChar.toLowerCase();
+        const isWhitePiece = oldPieceChar === oldPieceChar.toUpperCase();
+        if (removedPiece === 'k') {
+          castling = isWhitePiece ? castling.replace(/[KQ]/g, '') : castling.replace(/[kq]/g, '');
+        } else if (removedPiece === 'r') {
+          if (square === 'a1') castling = castling.replace('Q', '');
+          else if (square === 'h1') castling = castling.replace('K', '');
+          else if (square === 'a8') castling = castling.replace('q', '');
+          else if (square === 'h8') castling = castling.replace('k', '');
+        }
+        if (castling === '') castling = '-';
+      }
+      // If a piece is being placed, check if it affects castling
+      // (this handles cases where a non-rook piece moves to a rook starting square)
+      if (newPiece) {
         if (square === 'a1') castling = castling.replace('Q', '');
         else if (square === 'h1') castling = castling.replace('K', '');
         else if (square === 'a8') castling = castling.replace('q', '');
         else if (square === 'h8') castling = castling.replace('k', '');
+        if (castling === '') castling = '-';
       }
-      if (castling === '') castling = '-';
     }
     parts[2] = castling;
     parts[3] = '-';  // Reset en passant

@@ -14,6 +14,7 @@ import {
   logGameState,
   isValidFen,
   validateKings,
+  validateNoSelfCheck,
   type BoardDebugInfo,
   type GameDebugState,
 } from './gameUtils';
@@ -37,6 +38,7 @@ import type {
   TimeTravelSelection,
   Square,
 } from './types';
+import { TimelineTransaction } from './transaction';
 
 class GameManager {
   private timelines: Record<number, TimelineData> = {};
@@ -1300,7 +1302,8 @@ timelines - list timelines`,
     // Build new FEN without the piece
     // For simplicity, we set the square to empty and flip turn
     // Source: piece left, no capture on source timeline
-    const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite, false);
+    // skipSelfCheckValidation=true because the piece is LEAVING (check validation happens on target)
+    const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite, false, true);
     const sourceLoadResult = sourceTl.chess.load(newSourceFen);
     if (!sourceLoadResult) {
       console.error('[Cross-Timeline] Failed to load source FEN after remove!', { fen: newSourceFen });
@@ -1583,7 +1586,8 @@ timelines - list timelines`,
     // 1. Remove piece from source timeline (it traveled away)
     const sourceFen = sourceTl.chess.fen();
     // Source: piece left via time travel, no capture on source timeline
-    const newSourceFen = this._modifyFen(sourceFen, sourceSquare, null, !isWhite, false);
+    // skipSelfCheckValidation=true because the piece is LEAVING (check validation happens on new timeline)
+    const newSourceFen = this._modifyFen(sourceFen, sourceSquare, null, !isWhite, false, true);
     sourceTl.chess.load(newSourceFen);
 
     // Record the departure move on source timeline
@@ -1705,6 +1709,20 @@ timelines - list timelines`,
       });
     }
 
+    // Validate that the time-traveling player's king is not in check after arrival
+    // (moving player is isWhite ? 'w' : 'b', and FEN turn is already flipped to opponent)
+    const movingPlayerColor: 'w' | 'b' = isWhite ? 'w' : 'b';
+    const selfCheckValidation = validateNoSelfCheck(newTl.chess.fen(), movingPlayerColor);
+    if (!selfCheckValidation.valid) {
+      console.error('[Time Travel] CRITICAL: Time travel leaves own king in check!', {
+        fen: newTl.chess.fen(),
+        movingPlayerColor,
+        reason: selfCheckValidation.reason,
+      });
+      // TODO: Add rollback here using TimelineTransaction
+      throw new Error(`Illegal time travel: ${selfCheckValidation.reason}`);
+    }
+
     console.log('[Time Travel] New timeline chess state:', newTl.chess.fen());
     console.log('[Time Travel] New timeline board:', newTl.chess.board());
 
@@ -1811,8 +1829,9 @@ timelines - list timelines`,
    * Also updates castling rights, en passant, halfmove clock, and fullmove number.
    * Uses utility functions from gameUtils.ts for clean, testable logic.
    * @param isCapture - Set to true if this modification represents a capture
+   * @param skipSelfCheckValidation - Set to true to skip self-check validation (for source timeline removal)
    */
-  private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean, isCapture: boolean = false): string {
+  private _modifyFen(fen: string, square: Square, newPiece: Piece | null, whiteToMove: boolean, isCapture: boolean = false, skipSelfCheckValidation: boolean = false): string {
     // Use the centralized modifyFen utility which handles all FEN modification logic
     // including castling rights, en passant reset, halfmove clock, and fullmove number
     const result = modifyFenUtil({
@@ -1845,6 +1864,26 @@ timelines - list timelines`,
         blackKings: kingValidation.blackKings,
       });
       throw new Error(`FEN modification resulted in invalid king count: white=${kingValidation.whiteKings}, black=${kingValidation.blackKings}`);
+    }
+
+    // Validate that the moving player's king is not left in check
+    // whiteToMove indicates whose turn it is AFTER the move, so the moving player is the opposite
+    // Skip this validation for source timeline removal (the piece is leaving, check validation
+    // happens on the target timeline where the piece arrives)
+    if (!skipSelfCheckValidation) {
+      const movingPlayerColor: 'w' | 'b' = whiteToMove ? 'b' : 'w';
+      const selfCheckValidation = validateNoSelfCheck(result, movingPlayerColor);
+      if (!selfCheckValidation.valid) {
+        console.error('[_modifyFen] CRITICAL: Move leaves own king in check!', {
+          input: fen,
+          output: result,
+          square,
+          newPiece,
+          movingPlayerColor,
+          reason: selfCheckValidation.reason,
+        });
+        throw new Error(`Illegal teleport: ${selfCheckValidation.reason}`);
+      }
     }
 
     return result;
