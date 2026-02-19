@@ -614,6 +614,16 @@ export class TimelineCol implements ITimelineCol {
   render(position: Board): void {
     const timestamp = Date.now();
 
+    // ALWAYS LOG: This log appears even when DEBUG_MODE is false to help debug overlap issues
+    // Count pieces in position array for comparison
+    let pieceCount = 0;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (position[r][c]) pieceCount++;
+      }
+    }
+    console.log(`[Board3D.render] tl=${this.id} meshes=${this.pieceMeshes.length} map=${this._spriteMap.size} prev=${this._prevBoardState.size} pieces=${pieceCount}`);
+
     // REENTRANT CALL DETECTION: Catch overlapping render calls that could cause duplicates
     if (this._renderInProgress) {
       console.error(`[Board3D.render] REENTRANT_CALL_BUG: render() called while already executing!`, {
