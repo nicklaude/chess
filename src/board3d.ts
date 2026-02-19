@@ -703,17 +703,27 @@ export class TimelineCol implements ITimelineCol {
 
     // SAFETY: Clean up any orphaned sprites not in our map (in case of bugs)
     // This handles edge cases like rapid state changes
+    // Use position-based lookup instead of identity to catch sprites that may
+    // have been added at the same position with different object references
     for (let i = this.group.children.length - 1; i >= 0; i--) {
       const child = this.group.children[i];
       if (this._isMainBoardSprite(child)) {
-        // Check if this sprite is in our map
-        let found = false;
-        this._spriteMap.forEach((sprite) => {
-          if (sprite === child) found = true;
-        });
-        if (!found) {
+        // Calculate position key matching _spriteMap format
+        const col = Math.round(child.position.x + 3.5);
+        const row = Math.round(child.position.z + 3.5);
+        const posKey = `${row},${col}`;
+
+        // Check if THIS sprite is the canonical one at this position
+        const mapSprite = this._spriteMap.get(posKey);
+        if (!mapSprite || mapSprite !== child) {
+          // Either position not in map, or a different sprite is canonical - this is orphaned
           this.group.remove(child);
           spritePool.release(child as PooledSprite);
+          // Also remove from pieceMeshes if present
+          const idx = this.pieceMeshes.indexOf(child);
+          if (idx !== -1) {
+            this.pieceMeshes.splice(idx, 1);
+          }
         }
       }
     }
@@ -732,7 +742,7 @@ export class TimelineCol implements ITimelineCol {
         });
       }
 
-      // Check for duplicates
+      // Check for duplicates - use same key format as _spriteMap ("row,col")
       let spritesAtPieceHeight = 0;
       const spritePositions: Map<string, number> = new Map();
       this.group.traverse((child: Object3D) => {
@@ -741,7 +751,10 @@ export class TimelineCol implements ITimelineCol {
           const z = child.position.z;
           if (x >= -4 && x <= 4 && z >= -4 && z <= 4) {
             spritesAtPieceHeight++;
-            const posKey = `${x.toFixed(2)},${z.toFixed(2)}`;
+            // Use board coordinates matching _spriteMap format
+            const col = Math.round(x + 3.5);
+            const row = Math.round(z + 3.5);
+            const posKey = `${row},${col}`;
             spritePositions.set(posKey, (spritePositions.get(posKey) || 0) + 1);
           }
         }
@@ -781,19 +794,20 @@ export class TimelineCol implements ITimelineCol {
     const positionMap = new Map<string, { sprite: Sprite; pieceInfo: string; boardPosKey: string }[]>();
 
     // First pass: collect all sprites at MAIN_PIECE_Y grouped by position
+    // CRITICAL: Use SAME key format as _spriteMap ("row,col" integers) to ensure consistency
     for (let i = 0; i < this.group.children.length; i++) {
       const child = this.group.children[i];
       if (this._isMainBoardSprite(child)) {
-        const posKey = `${child.position.x.toFixed(2)},${child.position.z.toFixed(2)}`;
+        // Calculate board position key (row,col) - MUST match _spriteMap format from render()
+        const col = Math.round(child.position.x + 3.5);
+        const row = Math.round(child.position.z + 3.5);
+        const posKey = `${row},${col}`;  // Same format as render() uses for _spriteMap
 
         // Extract piece info from sprite texture/material for diagnostics
         const material = child.material as SpriteMaterial | undefined;
         const pieceInfo = material?.map?.name ?? material?.name ?? 'unknown';
 
-        // Calculate board position key (row,col) for _spriteMap lookup
-        const col = Math.round(child.position.x + 3.5);
-        const row = Math.round(child.position.z + 3.5);
-        const boardPosKey = `${row},${col}`;
+        const boardPosKey = posKey;  // Already in the correct format
 
         if (!positionMap.has(posKey)) {
           positionMap.set(posKey, []);
@@ -808,12 +822,10 @@ export class TimelineCol implements ITimelineCol {
       if (sprites.length > 1) {
         foundDuplicates = true;
 
-        // Convert position key back to chess square for logging
-        const [xStr, zStr] = posKey.split(',');
-        const x = parseFloat(xStr);
-        const z = parseFloat(zStr);
-        const col = Math.round(x + 3.5);
-        const row = Math.round(z + 3.5);
+        // Convert position key (now "row,col" format) back to chess square for logging
+        const [rowStr, colStr] = posKey.split(',');
+        const row = parseInt(rowStr);
+        const col = parseInt(colStr);
 
         // Validate calculated square is within valid chess board range
         let square: string;
