@@ -906,6 +906,111 @@ export class TimelineCol implements ITimelineCol {
     }
   }
 
+  /** CPU move preview - highlight source piece and show target with portal colors */
+  private cpuPreviewMeshes: Mesh[] = [];
+
+  showCpuMovePreview(from: string, to: string, isWhite: boolean, isTimeTravel: boolean = false): void {
+    this.clearCpuMovePreview();
+
+    const fromPos = this._fromSq(from);
+    const toPos = this._fromSq(to);
+    const color = isTimeTravel ? 0x44ffaa : (isWhite ? 0x88ccff : 0xffaa66);  // Cyan for time travel, blue/orange for normal
+
+    // Highlight source square with glowing ring
+    const sourceGeo = new THREE.RingGeometry(0.42, 0.52, 32);
+    const sourceMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const sourceRing = new THREE.Mesh(sourceGeo, sourceMat);
+    sourceRing.rotation.x = -Math.PI / 2;
+    sourceRing.position.set(fromPos.c - 3.5, 0.12, fromPos.r - 3.5);
+    this.group.add(sourceRing);
+    this.cpuPreviewMeshes.push(sourceRing);
+
+    // Source glow disc
+    const sourceGlowGeo = new THREE.CircleGeometry(0.45, 32);
+    const sourceGlowMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const sourceGlow = new THREE.Mesh(sourceGlowGeo, sourceGlowMat);
+    sourceGlow.rotation.x = -Math.PI / 2;
+    sourceGlow.position.set(fromPos.c - 3.5, 0.10, fromPos.r - 3.5);
+    this.group.add(sourceGlow);
+    this.cpuPreviewMeshes.push(sourceGlow);
+
+    // Target indicator (portal-style ring like cross-timeline targets)
+    const targetGeo = new THREE.RingGeometry(0.35, 0.48, 32);
+    const targetMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.75,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const targetRing = new THREE.Mesh(targetGeo, targetMat);
+    targetRing.rotation.x = -Math.PI / 2;
+    targetRing.position.set(toPos.c - 3.5, 0.09, toPos.r - 3.5);
+    this.group.add(targetRing);
+    this.cpuPreviewMeshes.push(targetRing);
+
+    // Target glow
+    const targetGlowGeo = new THREE.CircleGeometry(0.45, 32);
+    const targetGlowMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const targetGlow = new THREE.Mesh(targetGlowGeo, targetGlowMat);
+    targetGlow.rotation.x = -Math.PI / 2;
+    targetGlow.position.set(toPos.c - 3.5, 0.07, toPos.r - 3.5);
+    this.group.add(targetGlow);
+    this.cpuPreviewMeshes.push(targetGlow);
+
+    // Preview line connecting source to target
+    const fromWorld = new THREE.Vector3(fromPos.c - 3.5, 0.15, fromPos.r - 3.5);
+    const toWorld = new THREE.Vector3(toPos.c - 3.5, 0.15, toPos.r - 3.5);
+    const previewLine = Board3DManager._glowTube(fromWorld, toWorld, color, 0.02, 0.08, false, 0.6);
+    previewLine.userData.isCpuPreview = true;
+    this.group.add(previewLine);
+    this.cpuPreviewMeshes.push(previewLine as unknown as Mesh);
+  }
+
+  clearCpuMovePreview(): void {
+    for (const mesh of this.cpuPreviewMeshes) {
+      this.group.remove(mesh);
+      // Dispose materials and geometry
+      if ((mesh as Mesh).geometry) (mesh as Mesh).geometry.dispose();
+      if ((mesh as Mesh).material) {
+        const mat = (mesh as Mesh).material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          (mat as Material).dispose();
+        }
+      }
+      // If it's a Group (glow tube), traverse and dispose children
+      if ((mesh as unknown as Group).isGroup) {
+        (mesh as unknown as Group).traverse((child: Object3D) => {
+          if ((child as Mesh).geometry) (child as Mesh).geometry.dispose();
+          if ((child as Mesh).material) {
+            ((child as Mesh).material as Material).dispose();
+          }
+        });
+      }
+    }
+    this.cpuPreviewMeshes = [];
+  }
+
   clearHighlights(): void {
     for (let i = 0; i < this.highlightMeshes.length; i++) {
       const h = this.highlightMeshes[i];
@@ -922,7 +1027,7 @@ export class TimelineCol implements ITimelineCol {
     this.highlightMeshes = [];
   }
 
-  /* Cross-timeline movement indicators */
+  /* Cross-timeline movement indicators - enhanced with vertical beams */
   showCrossTimelineTarget(sq: string, isCapture: boolean): void {
     const pos = this._fromSq(sq);
     // Use shared geometry and material via pool
@@ -946,13 +1051,121 @@ export class TimelineCol implements ITimelineCol {
     glow.position.set(pos.c - 3.5, 0.07, pos.r - 3.5);
     this.group.add(glow);
     this.crossTimelineTargets.push(glow);
+
+    // Vertical beam above square (highly visible portal indicator)
+    const beamGeo = new THREE.CylinderGeometry(0.08, 0.15, 1.2, 8);
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff,
+      transparent: true,
+      opacity: 0.4,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.set(pos.c - 3.5, 0.7, pos.r - 3.5);
+    this.group.add(beam);
+    this.crossTimelineTargets.push(beam);
+
+    // Capture indicator (red-ish outer ring if capturing)
+    if (isCapture) {
+      const captureRingGeo = new THREE.RingGeometry(0.52, 0.58, 32);
+      const captureRingMat = new THREE.MeshBasicMaterial({
+        color: 0xff6666,
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const captureRing = new THREE.Mesh(captureRingGeo, captureRingMat);
+      captureRing.rotation.x = -Math.PI / 2;
+      captureRing.position.set(pos.c - 3.5, 0.10, pos.r - 3.5);
+      this.group.add(captureRing);
+      this.crossTimelineTargets.push(captureRing);
+    }
   }
 
   clearCrossTimelineTargets(): void {
     for (const mesh of this.crossTimelineTargets) {
-      meshPool.release(mesh as PooledMesh);
+      // Some meshes are pooled, some are not (beams, capture rings)
+      if ((mesh as PooledMesh)._poolType) {
+        meshPool.release(mesh as PooledMesh);
+      } else {
+        this.group.remove(mesh);
+        if ((mesh as Mesh).geometry) (mesh as Mesh).geometry.dispose();
+        if ((mesh as Mesh).material) ((mesh as Mesh).material as Material).dispose();
+      }
     }
     this.crossTimelineTargets = [];
+    // Also clear board glow border
+    this._clearBoardGlowBorder();
+  }
+
+  /** Add a glowing border around the entire board to indicate it's a valid target */
+  showBoardGlowBorder(color: number = 0xaa44ff): void {
+    this._clearBoardGlowBorder();
+
+    // Create 4 edge beams around the board perimeter
+    const halfSize = 4.3;  // Board is ~8.6 wide
+    const beamHeight = 0.15;
+    const beamWidth = 0.08;
+
+    const edges = [
+      { pos: [0, beamHeight, -halfSize], rot: [0, 0, 0], len: halfSize * 2 },  // Front edge
+      { pos: [0, beamHeight, halfSize], rot: [0, 0, 0], len: halfSize * 2 },   // Back edge
+      { pos: [-halfSize, beamHeight, 0], rot: [0, Math.PI / 2, 0], len: halfSize * 2 }, // Left edge
+      { pos: [halfSize, beamHeight, 0], rot: [0, Math.PI / 2, 0], len: halfSize * 2 },  // Right edge
+    ];
+
+    for (const edge of edges) {
+      const geo = new THREE.BoxGeometry(edge.len, beamWidth, beamWidth);
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const beam = new THREE.Mesh(geo, mat);
+      beam.position.set(edge.pos[0], edge.pos[1], edge.pos[2]);
+      beam.rotation.set(edge.rot[0], edge.rot[1], edge.rot[2]);
+      beam.userData.isBoardGlowBorder = true;
+      this.group.add(beam);
+    }
+
+    // Add corner glow spheres
+    const corners = [
+      [-halfSize, beamHeight, -halfSize],
+      [halfSize, beamHeight, -halfSize],
+      [-halfSize, beamHeight, halfSize],
+      [halfSize, beamHeight, halfSize],
+    ];
+
+    for (const corner of corners) {
+      const geo = new THREE.SphereGeometry(0.12, 8, 8);
+      const mat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      const sphere = new THREE.Mesh(geo, mat);
+      sphere.position.set(corner[0], corner[1], corner[2]);
+      sphere.userData.isBoardGlowBorder = true;
+      this.group.add(sphere);
+    }
+  }
+
+  /** Clear the board glow border */
+  private _clearBoardGlowBorder(): void {
+    for (let i = this.group.children.length - 1; i >= 0; i--) {
+      const child = this.group.children[i];
+      if (child.userData.isBoardGlowBorder) {
+        this.group.remove(child);
+        if ((child as Mesh).geometry) (child as Mesh).geometry.dispose();
+        if ((child as Mesh).material) ((child as Mesh).material as Material).dispose();
+      }
+    }
   }
 
   /* Time travel target indicators (on history layers) */
