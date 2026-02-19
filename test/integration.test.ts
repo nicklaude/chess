@@ -152,9 +152,13 @@ function modifyFen(options: ModifyFenOptions): string {
 
   let castling = parts[2] || '-';
   if (castling !== '-') {
-    if (!newPiece && oldPieceChar) {
+    // If a piece is being removed (either emptying square or capturing via replacement),
+    // check if the removed piece affects castling (e.g., rook on h1 captured by cross-timeline move)
+    if (oldPieceChar) {
       castling = updateCastlingForRemoval(castling, square, oldPieceChar);
     }
+    // If a piece is being placed, check if it affects castling
+    // (this handles cases where a non-rook piece moves to a rook starting square)
     if (newPiece) {
       castling = updateCastlingForPlacement(castling, square);
     }
