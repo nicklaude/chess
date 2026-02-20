@@ -337,6 +337,14 @@ class GameManager {
       });
     }
 
+    // FIX: Blur sliders after interaction to restore WASD keyboard control
+    // Range inputs keep focus after dragging, which blocks keyboard events
+    document.querySelectorAll('#cpu-controls input[type="range"]').forEach(slider => {
+      slider.addEventListener('change', () => {
+        (slider as HTMLInputElement).blur();
+      });
+    });
+
     // Disable camera follow when user pans manually
     const sceneContainer = document.getElementById('scene-container');
     if (sceneContainer) {
@@ -2976,8 +2984,8 @@ timelines - list timelines`,
     this.cpuMoveInProgress = true;
 
     try {
-      // Make a move on ONE random playable timeline (to keep pace reasonable)
-      const tlId = playableTimelines[Math.floor(Math.random() * playableTimelines.length)];
+      // 5D-aware timeline selection: prioritize based on tactical evaluation
+      const tlId = this._cpuSelectBestTimeline(playableTimelines);
       const moved = this._cpuMakeMove(tlId);
 
       if (moved) {
@@ -3022,6 +3030,81 @@ timelines - list timelines`,
     }
 
     return playable;
+  }
+
+  /**
+   * Evaluate material balance on a timeline (positive = white advantage)
+   * Used for 5D-aware timeline prioritization
+   */
+  private _evaluateMaterial(fen: string): number {
+    const pieceValues: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    let score = 0;
+    const boardPart = fen.split(' ')[0];
+    for (const char of boardPart) {
+      const piece = char.toLowerCase();
+      if (pieceValues[piece] !== undefined) {
+        const value = pieceValues[piece];
+        score += char === char.toUpperCase() ? value : -value; // Upper = white
+      }
+    }
+    return score;
+  }
+
+  /**
+   * Pick the best timeline to play on (5D-aware selection)
+   * Prioritizes timelines where:
+   * - We have check opportunities
+   * - We have material advantage (pressing)
+   * - We're in danger (defending)
+   */
+  private _cpuSelectBestTimeline(playable: number[]): number {
+    if (playable.length === 1) return playable[0];
+
+    const isWhite = this.cpuGlobalTurn === 'w';
+    let bestTlId = playable[0];
+    let bestScore = -Infinity;
+
+    for (const tlId of playable) {
+      const tl = this.timelines[tlId];
+      if (!tl) continue;
+
+      let score = 0;
+      const chess = tl.chess;
+
+      // Priority 1: We can give check (high priority)
+      const moves = chess.moves({ verbose: true });
+      const checkMoves = moves.filter((m: ChessMove) => m.san?.includes('+'));
+      if (checkMoves.length > 0) score += 50;
+
+      // Priority 2: We're in check (need to respond)
+      if (chess.in_check()) score += 40;
+
+      // Priority 3: Capture opportunities
+      const captureMoves = moves.filter((m: ChessMove) => m.captured);
+      score += captureMoves.length * 5;
+
+      // Priority 4: Material evaluation (press advantage or defend weakness)
+      const material = this._evaluateMaterial(chess.fen());
+      // If white: positive material is good. If black: negative material is good
+      const advantageMultiplier = isWhite ? material : -material;
+      if (advantageMultiplier > 0) {
+        // We have advantage - prioritize attacking here
+        score += advantageMultiplier * 3;
+      } else if (advantageMultiplier < 0) {
+        // We're behind - prioritize defending here
+        score += Math.abs(advantageMultiplier) * 2;
+      }
+
+      // Small random factor to avoid being too predictable
+      score += Math.random() * 5;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestTlId = tlId;
+      }
+    }
+
+    return bestTlId;
   }
 
   // CPU preview state for showing moves before executing
