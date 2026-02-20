@@ -810,6 +810,28 @@ export class TimelineCol implements ITimelineCol {
     // Update stored state for next render
     this._prevBoardState = newBoardState;
 
+    // CRITICAL FIX: Clean up any _spriteMap entries not in newBoardState
+    // This handles cases where _spriteMap and _prevBoardState got out of sync,
+    // which can happen during rapid state changes or edge cases in the diff logic.
+    // The diff-based removal only removes positions that were in _prevBoardState,
+    // so if _spriteMap has extra entries not in _prevBoardState, they would persist.
+    const spriteMapKeysToRemove: string[] = [];
+    this._spriteMap.forEach((sprite, posKey) => {
+      if (!newBoardState.has(posKey)) {
+        spriteMapKeysToRemove.push(posKey);
+      }
+    });
+    for (const posKey of spriteMapKeysToRemove) {
+      const sprite = this._spriteMap.get(posKey) as PooledSprite;
+      console.warn(`[Board3D.render] STALE_ENTRY_CLEANUP: Removing _spriteMap entry not in newBoardState tl=${this.id} posKey=${posKey}`);
+      spritePool.release(sprite);
+      this._spriteMap.delete(posKey);
+      const idx = this.pieceMeshes.indexOf(sprite);
+      if (idx !== -1) {
+        this.pieceMeshes.splice(idx, 1);
+      }
+    }
+
     // SAFETY: Clean up any orphaned sprites not in our map (in case of bugs)
     // This handles edge cases like rapid state changes
     // Use position-based lookup instead of identity to catch sprites that may
