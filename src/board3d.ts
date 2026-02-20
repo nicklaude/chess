@@ -356,12 +356,25 @@ class SpritePool {
 
   /** Return a sprite to the pool */
   release(sprite: PooledSprite): void {
-    if (!sprite._pooled) return;
-
+    // v0.1.77 FIX: Always remove from parent first, even for non-pooled sprites
+    // This ensures ghost sprites are removed from scene regardless of pool status
     if (sprite.parent) {
       sprite.parent.remove(sprite);
     }
     sprite.visible = false;
+
+    // Non-pooled sprites: log warning and dispose (they won't be reused)
+    if (!sprite._pooled) {
+      console.warn('[SpritePool] NON_POOLED_SPRITE: Removing sprite that was not created via pool. This may indicate a bug in sprite creation.', {
+        hasParent: !!sprite.parent,
+        position: sprite.position ? { x: sprite.position.x, y: sprite.position.y, z: sprite.position.z } : null,
+      });
+      // Dispose the material since we can't reuse this sprite
+      if (sprite.material) {
+        (sprite.material as SpriteMaterial).dispose();
+      }
+      return;
+    }
 
     if (this.pool.length < this.maxPoolSize) {
       this.pool.push(sprite);
@@ -725,9 +738,13 @@ export class TimelineCol implements ITimelineCol {
       const sprite = this._spriteMap.get(posKey) as PooledSprite | undefined;
       if (sprite) {
         // ALWAYS LOG: Track removal to debug ghost pieces
-        console.log(`[Board3D.render] REMOVING sprite at ${posKey} tl=${this.id}`);
+        console.log(`[Board3D.render] REMOVING sprite at ${posKey} tl=${this.id} pooled=${sprite._pooled}`);
 
-        // Return to pool for reuse
+        // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
+        // This ensures removal even if sprite wasn't created via pool
+        this.group.remove(sprite);
+
+        // Return to pool for reuse (also handles non-pooled sprites now)
         spritePool.release(sprite);
         this._spriteMap.delete(posKey);
         // Remove from pieceMeshes array
@@ -763,8 +780,11 @@ export class TimelineCol implements ITimelineCol {
             timeline: this.id,
             posKey,
             timestamp,
+            pooled: existingSprite._pooled,
           });
         }
+        // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
+        this.group.remove(existingSprite);
         spritePool.release(existingSprite);
         const existingIdx = this.pieceMeshes.indexOf(existingSprite);
         if (existingIdx !== -1) {
@@ -823,8 +843,12 @@ export class TimelineCol implements ITimelineCol {
     });
     for (const posKey of spriteMapKeysToRemove) {
       const sprite = this._spriteMap.get(posKey) as PooledSprite;
-      console.warn(`[Board3D.render] STALE_ENTRY_CLEANUP: Removing _spriteMap entry not in newBoardState tl=${this.id} posKey=${posKey}`);
-      spritePool.release(sprite);
+      console.warn(`[Board3D.render] STALE_ENTRY_CLEANUP: Removing _spriteMap entry not in newBoardState tl=${this.id} posKey=${posKey} pooled=${sprite?._pooled}`);
+      // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
+      if (sprite) {
+        this.group.remove(sprite);
+        spritePool.release(sprite);
+      }
       this._spriteMap.delete(posKey);
       const idx = this.pieceMeshes.indexOf(sprite);
       if (idx !== -1) {
@@ -913,6 +937,8 @@ export class TimelineCol implements ITimelineCol {
       for (const posKey of keysToDelete) {
         const sprite = this._spriteMap.get(posKey);
         if (sprite) {
+          // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
+          this.group.remove(sprite);
           spritePool.release(sprite as PooledSprite);
           const idx = this.pieceMeshes.indexOf(sprite);
           if (idx !== -1) {
@@ -1131,6 +1157,8 @@ export class TimelineCol implements ITimelineCol {
                 this.pieceMeshes.splice(pieceMeshIdx, 1);
               }
 
+              // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
+              this.group.remove(spriteEntry.sprite);
               // Return to sprite pool (handles removal from parent and disposal)
               spritePool.release(spriteEntry.sprite as PooledSprite);
             }
@@ -1151,8 +1179,10 @@ export class TimelineCol implements ITimelineCol {
     console.warn(`[Board3D] FORCE_REBUILD timeline=${this.id} - clearing all state and re-rendering`);
 
     // Clear all piece sprites - return to pool
+    // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
     for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
       const sprite = this.pieceMeshes[i] as PooledSprite;
+      this.group.remove(sprite);
       spritePool.release(sprite);
     }
     this.pieceMeshes.length = 0;
@@ -1847,8 +1877,10 @@ export class TimelineCol implements ITimelineCol {
 
   clearAll(): void {
     // Clear and return piece sprites to pool for reuse
+    // v0.1.77 FIX: Explicitly remove from scene BEFORE pool release
     for (let i = this.pieceMeshes.length - 1; i >= 0; i--) {
       const sprite = this.pieceMeshes[i] as PooledSprite;
+      this.group.remove(sprite);
       spritePool.release(sprite);
     }
     this.pieceMeshes.length = 0;
