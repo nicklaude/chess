@@ -47,6 +47,21 @@ declare const THREE: typeof import('three') & {
 // Set to true to enable detailed render logging
 const DEBUG_MODE = true;
 
+// Session-wide ghost removal counter
+// Tracks MANDATORY_SYNC removals across all Board3D instances
+let sessionGhostRemovalCount = 0;
+
+// Update the ghost counter display in the UI
+function updateGhostCounterDisplay(): void {
+  const ghostCounterEl = document.getElementById('ghost-counter');
+  if (ghostCounterEl) {
+    ghostCounterEl.textContent = sessionGhostRemovalCount > 0 ? `G:${sessionGhostRemovalCount}` : '0';
+    if (sessionGhostRemovalCount > 0) {
+      ghostCounterEl.classList.add('active');
+    }
+  }
+}
+
 // ===============================================================
 // SharedResources - singleton for shared geometries and materials
 // Performance optimization: create once, reuse everywhere
@@ -731,6 +746,8 @@ export class TimelineCol implements ITimelineCol {
     }
     if (mandatorySyncRemoved > 0) {
       console.error(`[Board3D.render] MANDATORY_SYNC_REMOVED: ${mandatorySyncRemoved} ghost sprites at positions=[${mandatorySyncRemovedPositions.join(',')}] tl=${this.id}`);
+      sessionGhostRemovalCount += mandatorySyncRemoved;
+      updateGhostCounterDisplay();
     }
 
     // Find what changed: removed, added, and unchanged positions

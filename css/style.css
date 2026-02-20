@@ -82,6 +82,9 @@ body::-webkit-scrollbar {
     border-radius: 10px;
     text-align: center;
     border: 1px solid rgba(80, 80, 160, 0.2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* FEN display with navigation */
@@ -825,9 +828,12 @@ body::-webkit-scrollbar {
     }
 
     #status {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         padding: 0.5rem;
         flex-shrink: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     /* FEN display improvements for mobile - ensure visibility */
@@ -901,9 +907,12 @@ body::-webkit-scrollbar {
     }
 
     #status {
-        font-size: 0.85rem;
+        font-size: 0.75rem;
         padding: 0.4rem;
         flex-shrink: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     /* Ensure FEN stays visible on very small screens */
@@ -998,6 +1007,15 @@ body::-webkit-scrollbar {
 
 #fps-counter {
     color: #66aa66;
+}
+
+#ghost-counter {
+    color: #666688;
+    cursor: help;
+}
+
+#ghost-counter.active {
+    color: #ff8866;
 }
 
 #version-info {
