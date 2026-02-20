@@ -792,6 +792,7 @@ body::-webkit-scrollbar {
     min-width: 32px;
     height: auto;
     padding: 0.4rem;
+    margin-top: 0.3rem;  /* Add top padding to align with sliders */
     font-size: 1rem;
     line-height: 1;
     background: rgba(60, 60, 100, 0.4);
@@ -803,6 +804,11 @@ body::-webkit-scrollbar {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+#cpu-camera-toggle svg {
+    width: 16px;
+    height: 16px;
 }
 
 #cpu-camera-toggle:hover {
@@ -831,6 +837,13 @@ body::-webkit-scrollbar {
     margin-bottom: 0.4rem;
     font-size: 0.72rem;
     font-weight: 600;
+}
+
+.cpu-section-header svg {
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    margin-right: 0.3rem;
 }
 
 .cpu-section label {

@@ -38,13 +38,13 @@
                         <label>Speed: <input type="range" id="cpu-speed" min="100" max="2000" value="400" step="100"><span id="cpu-speed-value">400ms</span></label>
                         <label>Max Timelines: <input type="range" id="max-timelines" min="5" max="100" value="5" step="5"><span id="max-timelines-value">5</span></label>
                     </div>
-                    <button id="cpu-camera-toggle" class="active" title="Toggle camera follow">📷</button>
+                    <button id="cpu-camera-toggle" class="active" title="Toggle camera follow"><i data-lucide="camera"></i></button>
                 </div>
 
                 <!-- Stockfish Engine -->
                 <div id="cpu-stockfish-controls" class="cpu-section cpu-stockfish-controls">
                     <div class="cpu-section-header">
-                        <span>🧠 Stockfish AI</span>
+                        <span><i data-lucide="brain"></i> Stockfish AI</span>
                         <span id="cpu-stockfish-status" class="cpu-stockfish-status">Loading...</span>
                     </div>
                     <div class="cpu-skill-row">
@@ -57,7 +57,7 @@
                 <!-- 5D Chess Settings -->
                 <div id="cpu-5d-controls" class="cpu-section">
                     <div class="cpu-section-header">
-                        <span>🌀 5D Chess Aggression</span>
+                        <span><i data-lucide="orbit"></i> 5D Chess Aggression</span>
                     </div>
                     <label>Cross-Timeline %: <input type="range" id="cpu-cross-timeline" min="0" max="100" value="60" step="5"><span id="cpu-cross-timeline-value">60%</span></label>
                     <label>Time Travel %: <input type="range" id="cpu-time-travel" min="0" max="100" value="40" step="5"><span id="cpu-time-travel-value">40%</span></label>
@@ -115,7 +115,7 @@
             <div id="sidebar-footer">
                 <span id="fps-counter">-- FPS</span>
                 <span id="ghost-counter" title="MANDATORY_SYNC ghost removals this session">0</span>
-                <span id="version-info">v0.2.89</span>
+                <span id="version-info">v0.2.90</span>
             </div>
         </div>
     </div>
