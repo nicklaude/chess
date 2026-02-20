@@ -39,9 +39,9 @@ body::-webkit-scrollbar {
 }
 
 #sidebar {
-    width: 250px;
-    min-width: 180px;
-    max-width: 400px;
+    width: 300px;
+    min-width: 220px;
+    max-width: 450px;
     flex-shrink: 0;
     flex-grow: 0;
     background: linear-gradient(180deg, rgba(12, 12, 30, 0.97) 0%, rgba(8, 8, 24, 0.98) 100%);
@@ -324,6 +324,7 @@ body::-webkit-scrollbar {
 #moves {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     background: rgba(35, 35, 65, 0.4);
     border-radius: 10px;
     padding: 0.75rem;
@@ -595,23 +596,40 @@ body::-webkit-scrollbar {
     opacity: 0;
 }
 
+.shortcut-group {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6666aa;
+    margin-top: 0.4rem;
+    margin-bottom: 0.15rem;
+    padding-bottom: 0.1rem;
+    border-bottom: 1px solid rgba(80, 80, 160, 0.2);
+}
+
+.shortcut-group:first-child {
+    margin-top: 0;
+}
+
 .shortcut-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.2rem 0;
+    padding: 0.15rem 0;
     color: #888899;
+    font-size: 0.68rem;
 }
 
 .shortcut-row .key {
     font-family: 'Courier New', monospace;
-    font-size: 0.68rem;
+    font-size: 0.62rem;
     background: rgba(60, 60, 100, 0.5);
-    padding: 0.15rem 0.35rem;
+    padding: 0.12rem 0.3rem;
     border-radius: 4px;
     color: #aaaacc;
     font-weight: 600;
-    min-width: 60px;
+    min-width: 55px;
     text-align: center;
 }
 
@@ -697,16 +715,83 @@ body::-webkit-scrollbar {
     cursor: pointer;
 }
 
+/* CPU sections styling */
+.cpu-section {
+    padding: 0.4rem 0;
+}
+
+.cpu-section:first-child {
+    padding-top: 0;
+}
+
+.cpu-section:last-child {
+    padding-bottom: 0;
+}
+
+.cpu-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #7777aa;
+    margin-bottom: 0.35rem;
+    padding-bottom: 0.2rem;
+    border-bottom: 1px solid rgba(80, 80, 160, 0.15);
+}
+
+.cpu-stockfish-status {
+    font-size: 0.6rem;
+    font-weight: 400;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    background: rgba(80, 80, 160, 0.2);
+}
+
+.cpu-stockfish-status.ready {
+    background: rgba(80, 200, 120, 0.2);
+    color: #66dd88;
+}
+
+.cpu-stockfish-status.error {
+    background: rgba(200, 80, 80, 0.2);
+    color: #dd6666;
+}
+
+/* CPU sliders row with camera toggle */
+.cpu-sliders-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+}
+
+.cpu-sliders {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
 #cpu-camera-toggle {
-    width: 100%;
+    width: 32px;
+    min-width: 32px;
+    height: auto;
     padding: 0.4rem;
-    font-size: 0.72rem;
+    font-size: 1rem;
+    line-height: 1;
     background: rgba(60, 60, 100, 0.4);
     border: 1px solid rgba(80, 80, 160, 0.3);
     border-radius: 6px;
     color: #8888bb;
     cursor: pointer;
     transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#cpu-camera-toggle:hover {
+    background: rgba(80, 80, 120, 0.5);
 }
 
 #cpu-camera-toggle.active {
@@ -766,6 +851,21 @@ body::-webkit-scrollbar {
     color: #88bb88;
 }
 
+/* CPU color row - simplified layout */
+.cpu-color-row {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.3rem 0;
+}
+
+.cpu-color-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.72rem;
+    color: #9999bb;
+}
+
 /* Per-piece portal sliders */
 .portal-sliders {
     display: grid;
@@ -799,9 +899,9 @@ body::-webkit-scrollbar {
 /* Medium screens - slightly smaller sidebar */
 @media (max-width: 1000px) {
     #sidebar {
-        width: 220px;
-        min-width: 180px;
-        max-width: 280px;
+        width: 260px;
+        min-width: 200px;
+        max-width: 320px;
         padding: 1rem;
     }
 }
@@ -809,7 +909,7 @@ body::-webkit-scrollbar {
 /* Ensure sidebar never exceeds viewport on wider screens */
 @media (min-width: 1001px) {
     #sidebar {
-        max-width: min(350px, 30vw);
+        max-width: min(400px, 30vw);
     }
 }
 

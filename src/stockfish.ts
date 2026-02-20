@@ -54,7 +54,7 @@ export class StockfishManager {
   }
 
   /**
-   * Load the Stockfish engine from CDN as a Web Worker
+   * Load the Stockfish engine as a Web Worker with proper WASM path resolution
    */
   async loadEngine(): Promise<boolean> {
     if (this.worker) {
@@ -79,10 +79,11 @@ export class StockfishManager {
     this.isLoading = true;
 
     try {
-      // Create a Web Worker from the wrapper script that properly configures WASM path
-      // Using the single-threaded version for broad browser compatibility
-      // The files are bundled locally to avoid CDN loading issues
-      const workerUrl = 'lib/stockfish-worker.js';
+      // Create the worker using the wrapper script that handles WASM path resolution
+      // The wrapper script uses self.location.href to determine the base URL
+      // which works correctly when loaded from a direct file path
+      const workerUrl = new URL('lib/stockfish-worker.js', window.location.href).href;
+      console.log('[Stockfish] Creating worker from:', workerUrl);
 
       this.worker = new Worker(workerUrl);
 

@@ -1,11 +1,13 @@
 {
   "name": "chess",
-  "version": "0.2.86",
+  "version": "0.2.87",
   "description": "6D Chess - multiverse chess with timeline branching",
   "main": "dist/bundle.js",
   "scripts": {
     "build": "node build.js",
     "watch": "node build.js --watch",
+    "serve": "python3 -m http.server 8000",
+    "dev": "npm run build && npm run serve",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit && echo 'Types OK!'",
     "test": "npm run test:unit && npm run test:integration && npm run test:headless",

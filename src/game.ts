@@ -39,6 +39,7 @@ import type {
   Square,
 } from './types';
 import { TimelineTransaction } from './transaction';
+import { stockfish } from './stockfish';
 
 class GameManager {
   private timelines: Record<number, TimelineData> = {};
@@ -3203,7 +3204,8 @@ timelines - list timelines`,
 
     const cameraBtn = document.getElementById('cpu-camera-toggle');
     if (cameraBtn) {
-      cameraBtn.textContent = this.cpuCameraFollow ? 'Camera Follow: ON' : 'Camera Follow: OFF';
+      // Keep the emoji icon, just update tooltip and active state
+      cameraBtn.title = this.cpuCameraFollow ? 'Camera follow: ON (click to disable)' : 'Camera follow: OFF (click to enable)';
       cameraBtn.classList.toggle('active', this.cpuCameraFollow);
     }
 
@@ -3217,6 +3219,19 @@ timelines - list timelines`,
     if (blackToggle) {
       blackToggle.textContent = this.cpuBlackEnabled ? 'ON' : 'OFF';
       blackToggle.classList.toggle('active', this.cpuBlackEnabled);
+    }
+
+    // Update Stockfish status
+    const stockfishStatus = document.getElementById('cpu-stockfish-status');
+    if (stockfishStatus) {
+      if (stockfish.available) {
+        stockfishStatus.textContent = 'Ready';
+        stockfishStatus.classList.add('ready');
+        stockfishStatus.classList.remove('error');
+      } else {
+        stockfishStatus.textContent = 'Loading...';
+        stockfishStatus.classList.remove('ready', 'error');
+      }
     }
   }
 }
