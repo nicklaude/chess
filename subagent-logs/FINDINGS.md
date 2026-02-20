@@ -73,7 +73,9 @@ Run games **until all boards are complete** (checkmate/stalemate/draw on all tim
 Settings:
 - Speed: 500ms (faster than previous 1000ms)
 - Auto-terminate when game truly ends
-- Screenshot frequency: every 10 moves (not every move)
+- **Screenshot: one specific board per game, every move** (not multiple boards)
+- Turn off camera follow, use keyboard shortcuts (1-9 to select board, Tab to cycle)
+- Focus on FIRST TIMELINE (board 1) for consistency
 - Report specific code line numbers for any bugs found
 
 ## Code Locations to Investigate

@@ -513,7 +513,7 @@ export class TimelineCol implements ITimelineCol {
   private timeTravelTargets: Mesh[] = [];     // Cyan-green portals for time travel moves
   private drawnBranchIndices: Set<number> = new Set();  // Track which snapshot indices have branches drawn
   private _is2DMode = false;  // Track if 2D mode is active (hide history layers)
-  private _debugLabel: THREE.Sprite | null = null;  // Reference to debug label for hiding in 2D mode
+  private _debugLabel: Sprite | null = null;  // Reference to debug label for hiding in 2D mode
 
   // Performance: track previous board state for diff-based rendering
   // Store as map of "row,col" -> "type,color" to detect what changed
