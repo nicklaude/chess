@@ -16,3 +16,6 @@ dist/
 # IDE
 .vscode/
 .idea/
+
+# Subagent raw logs (too large for git - keep FINDINGS.md summary only)
+subagent-logs/agent*.md

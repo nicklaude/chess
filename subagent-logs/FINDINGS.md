@@ -61,9 +61,23 @@ Key timestamps around bug observations:
 3. ✅ Speed slider display (shows actual delay)
 4. 🔧 2D mode button styling (needs more work)
 
-## Next Steps
+## Next Subagent Run Plan
 
-1. Trace indicator drawing code path
-2. Check if indicators are scoped to correct timeline
-3. Add timeline ID validation before drawing indicators
-4. Test fix with new subagents
+Run games **until all boards are complete** (checkmate/stalemate/draw on all timelines):
+
+1. **Stockfish 2D** - full game completion
+2. **Stockfish 3D** - full game completion
+3. **Dumb CPU 2D** - full game completion
+4. **Stockfish 2D with skill mismatch** - Black=noob (skill 0), White=pro (skill 20)
+
+Settings:
+- Speed: 500ms (faster than previous 1000ms)
+- Auto-terminate when game truly ends
+- Screenshot frequency: every 10 moves (not every move)
+- Report specific code line numbers for any bugs found
+
+## Code Locations to Investigate
+
+- `/src/board3d.ts`: Line drawing (moveLineGroup, lastMoveHL)
+- `/src/board3d.ts`: spriteMap management
+- `/src/game.ts`: makeMove() and cross-timeline move execution
