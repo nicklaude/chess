@@ -34,18 +34,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Auto-bump version to PR number
+      - name: Auto-bump version based on PR number
         run: |
           # Get the PR number from the merge commit message
           PR_NUM=$(git log -1 --pretty=%B | grep -oP '#\K\d+' | head -1)
           if [ -n "$PR_NUM" ]; then
-            # Update package.json version to 1.{PR_NUM}.0
+            # Update package.json version to 0.2.{PR_NUM} (keeps semantic versioning)
             node -e "
               const fs = require('fs');
               const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-              pkg.version = '1.${PR_NUM}.0';
+              pkg.version = '0.2.${PR_NUM}';
               fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-              console.log('Version bumped to 1.${PR_NUM}.0');
+              console.log('Version bumped to 0.2.${PR_NUM}');
             "
           fi
 
@@ -61,7 +61,8 @@ jobs:
           cp index.html deploy/
           cp -r css deploy/
           cp -r dist deploy/
-          cp .nojekyll deploy/
+          cp -r lib deploy/
+          cp .nojekyll deploy/ 2>/dev/null || true
 
       - uses: actions/configure-pages@v5
 
