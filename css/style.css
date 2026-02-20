@@ -108,13 +108,26 @@ body::-webkit-scrollbar {
 
 #fen-text {
     flex: 1;
-    overflow: hidden;
-    word-break: break-all;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
     line-height: 1.3;
-    /* Show 2 lines on mobile, 1 line on desktop */
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    font-size: 0.6rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100, 100, 180, 0.3) transparent;
+}
+
+#fen-text::-webkit-scrollbar {
+    height: 4px;
+}
+
+#fen-text::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#fen-text::-webkit-scrollbar-thumb {
+    background: rgba(100, 100, 180, 0.3);
+    border-radius: 2px;
 }
 
 /* FEN navigation arrows */
@@ -339,6 +352,7 @@ body::-webkit-scrollbar {
 
 .move {
     min-width: 3.5rem;
+    white-space: nowrap;
 }
 
 #reset {
@@ -826,10 +840,10 @@ body::-webkit-scrollbar {
     }
 
     #fen-text {
-        -webkit-line-clamp: 3;
+        /* Keep horizontal scroll on mobile too */
+        white-space: nowrap;
+        overflow-x: auto;
         line-height: 1.4;
-        overflow-wrap: break-word;
-        word-break: break-all;
     }
 
     /* FEN tooltip positioning fix for mobile */
@@ -901,7 +915,9 @@ body::-webkit-scrollbar {
     }
 
     #fen-text {
-        -webkit-line-clamp: 2;
+        /* Keep horizontal scroll on very small screens too */
+        white-space: nowrap;
+        overflow-x: auto;
         line-height: 1.3;
     }
 
