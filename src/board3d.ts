@@ -3,7 +3,7 @@
 // THREE.js is loaded from CDN as a global - we just use the types from @types/three
 import type {
   Scene, PerspectiveCamera, WebGLRenderer, Raycaster, Vector2, Vector3, Clock,
-  Group, Mesh, Sprite, Points, Material, MeshStandardMaterial, SpriteMaterial,
+  Group, Mesh, Sprite, Points, Material, MeshStandardMaterial, MeshBasicMaterial, SpriteMaterial,
   Texture, Object3D, BufferAttribute, Color, BoxGeometry, Curve, BufferGeometry
 } from 'three';
 
