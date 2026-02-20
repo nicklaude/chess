@@ -2,20 +2,6 @@
 
 import type { Square } from './types';
 
-// Stockfish UCI engine interface
-interface StockfishEngine {
-  postMessage(msg: string): void;
-  addMessageListener(handler: (msg: string) => void): void;
-  removeMessageListener(handler: (msg: string) => void): void;
-}
-
-// Global Stockfish constructor from CDN
-declare global {
-  interface Window {
-    Stockfish?: () => StockfishEngine;
-  }
-}
-
 export interface StockfishMove {
   from: Square;
   to: Square;
@@ -25,11 +11,11 @@ export interface StockfishMove {
 /**
  * StockfishManager - Manages Stockfish chess engine for CPU play
  *
- * Uses stockfish.js from CDN (lite single-threaded version ~7MB)
+ * Uses stockfish.js Web Worker from CDN for UCI chess engine
  * Handles UCI protocol communication with the engine
  */
 export class StockfishManager {
-  private engine: StockfishEngine | null = null;
+  private worker: Worker | null = null;
   private isReady = false;
   private isLoading = false;
   private pendingResolve: ((move: StockfishMove | null) => void) | null = null;
@@ -42,10 +28,10 @@ export class StockfishManager {
   }
 
   /**
-   * Load the Stockfish engine from CDN
+   * Load the Stockfish engine from CDN as a Web Worker
    */
   async loadEngine(): Promise<boolean> {
-    if (this.engine) {
+    if (this.worker) {
       return true;
     }
 
@@ -56,7 +42,7 @@ export class StockfishManager {
           if (this.isReady) {
             clearInterval(checkReady);
             resolve(true);
-          } else if (!this.isLoading && !this.engine) {
+          } else if (!this.isLoading && !this.worker) {
             clearInterval(checkReady);
             resolve(false);
           }
@@ -67,27 +53,32 @@ export class StockfishManager {
     this.isLoading = true;
 
     try {
-      // Check if Stockfish constructor is available from CDN
-      if (typeof window.Stockfish !== 'function') {
-        console.warn('[Stockfish] Engine not loaded from CDN');
-        this.isLoading = false;
-        return false;
-      }
+      // Create a Web Worker from the stockfish CDN URL
+      // Using the single-threaded version for broad browser compatibility
+      const workerUrl = 'https://cdn.jsdelivr.net/npm/stockfish@16/src/stockfish-nnue-16-single.js';
 
-      // Initialize the engine
-      this.engine = window.Stockfish();
+      // Create inline worker that loads stockfish from CDN
+      const blob = new Blob([`
+        importScripts('${workerUrl}');
+      `], { type: 'application/javascript' });
+
+      this.worker = new Worker(URL.createObjectURL(blob));
 
       // Setup message handler
-      this.engine.addMessageListener((msg) => this.handleMessage(msg));
+      this.worker.onmessage = (e) => this.handleMessage(String(e.data));
+
+      this.worker.onerror = (err) => {
+        console.error('[Stockfish] Worker error:', err);
+      };
 
       // Initialize UCI
-      this.engine.postMessage('uci');
+      this.worker.postMessage('uci');
 
       // Wait for uciok
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Stockfish UCI timeout'));
-        }, 5000);
+        }, 10000); // 10s timeout for loading WASM
 
         const checkReady = setInterval(() => {
           if (this.isReady) {
@@ -106,7 +97,8 @@ export class StockfishManager {
       return true;
     } catch (error) {
       console.error('[Stockfish] Failed to load engine:', error);
-      this.engine = null;
+      this.worker?.terminate();
+      this.worker = null;
       this.isLoading = false;
       return false;
     }
@@ -159,8 +151,8 @@ export class StockfishManager {
    */
   setSkillLevel(level: number): void {
     this._skillLevel = Math.max(0, Math.min(20, level));
-    if (this.engine && this.isReady) {
-      this.engine.postMessage(`setoption name Skill Level value ${this._skillLevel}`);
+    if (this.worker && this.isReady) {
+      this.worker.postMessage(`setoption name Skill Level value ${this._skillLevel}`);
     }
   }
 
@@ -183,7 +175,7 @@ export class StockfishManager {
    * Check if the engine is available and ready
    */
   get available(): boolean {
-    return this.engine !== null && this.isReady;
+    return this.worker !== null && this.isReady;
   }
 
   /**
@@ -193,7 +185,7 @@ export class StockfishManager {
    * @returns Promise<StockfishMove | null> - The best move or null if unavailable
    */
   async getBestMove(fen: string, depth?: number): Promise<StockfishMove | null> {
-    if (!this.engine || !this.isReady) {
+    if (!this.worker || !this.isReady) {
       // Try to load engine if not ready
       const loaded = await this.loadEngine();
       if (!loaded) {
@@ -210,7 +202,7 @@ export class StockfishManager {
       const timeout = setTimeout(() => {
         console.warn('[Stockfish] Search timed out');
         this.pendingResolve = null;
-        this.engine?.postMessage('stop');
+        this.worker?.postMessage('stop');
         resolve(null);
       }, 10000); // 10 second timeout
 
@@ -220,8 +212,8 @@ export class StockfishManager {
       };
 
       // Send position and search command
-      this.engine!.postMessage(`position fen ${fen}`);
-      this.engine!.postMessage(`go depth ${searchDepth}`);
+      this.worker!.postMessage(`position fen ${fen}`);
+      this.worker!.postMessage(`go depth ${searchDepth}`);
     });
   }
 
@@ -229,8 +221,8 @@ export class StockfishManager {
    * Stop any ongoing search
    */
   stop(): void {
-    if (this.engine) {
-      this.engine.postMessage('stop');
+    if (this.worker) {
+      this.worker.postMessage('stop');
       if (this.pendingResolve) {
         this.pendingResolve(null);
         this.pendingResolve = null;
@@ -242,8 +234,8 @@ export class StockfishManager {
    * Reset the engine for a new game
    */
   newGame(): void {
-    if (this.engine && this.isReady) {
-      this.engine.postMessage('ucinewgame');
+    if (this.worker && this.isReady) {
+      this.worker.postMessage('ucinewgame');
     }
   }
 }

@@ -274,25 +274,7 @@ class GameManager {
       });
     }
 
-    // Per-piece portal sliders for white
-    const pieceTypes = ['q', 'r', 'b', 'n'] as const;
-    for (const pt of pieceTypes) {
-      const slider = document.getElementById(`cpu-white-portal-${pt}`) as HTMLInputElement | null;
-      if (slider) {
-        slider.addEventListener('input', () => {
-          this.cpuWhitePortalBias[pt] = parseInt(slider.value) / 100;
-        });
-      }
-    }
-
-    const whiteCapture = document.getElementById('cpu-white-capture') as HTMLInputElement | null;
-    if (whiteCapture) {
-      whiteCapture.addEventListener('input', () => {
-        this.cpuSetWhiteCapturePreference(parseInt(whiteCapture.value) / 100);
-      });
-    }
-
-    // Black CPU controls
+    // Black CPU toggle
     const blackToggle = document.getElementById('cpu-black-toggle');
     if (blackToggle) {
       blackToggle.addEventListener('click', () => {
@@ -301,20 +283,49 @@ class GameManager {
       });
     }
 
-    // Per-piece portal sliders for black
+    // Unified 5D controls (apply to both colors)
+    const crossTimelineSlider = document.getElementById('cpu-cross-timeline') as HTMLInputElement | null;
+    const crossTimelineValue = document.getElementById('cpu-cross-timeline-value');
+    if (crossTimelineSlider) {
+      crossTimelineSlider.addEventListener('input', () => {
+        const val = parseInt(crossTimelineSlider.value);
+        this.cpuCrossTimelineChance = val / 100;
+        if (crossTimelineValue) crossTimelineValue.textContent = `${val}%`;
+      });
+    }
+
+    const timeTravelSlider = document.getElementById('cpu-time-travel') as HTMLInputElement | null;
+    const timeTravelValue = document.getElementById('cpu-time-travel-value');
+    if (timeTravelSlider) {
+      timeTravelSlider.addEventListener('input', () => {
+        const val = parseInt(timeTravelSlider.value);
+        this.cpuTimeTravelChance = val / 100;
+        if (timeTravelValue) timeTravelValue.textContent = `${val}%`;
+      });
+    }
+
+    // Unified per-piece portal sliders (apply to both colors)
+    const pieceTypes = ['q', 'r', 'b', 'n'] as const;
     for (const pt of pieceTypes) {
-      const slider = document.getElementById(`cpu-black-portal-${pt}`) as HTMLInputElement | null;
+      const slider = document.getElementById(`cpu-portal-${pt}`) as HTMLInputElement | null;
       if (slider) {
         slider.addEventListener('input', () => {
-          this.cpuBlackPortalBias[pt] = parseInt(slider.value) / 100;
+          const val = parseInt(slider.value) / 100;
+          this.cpuWhitePortalBias[pt] = val;
+          this.cpuBlackPortalBias[pt] = val;
+          // Update the label
+          const span = slider.nextElementSibling;
+          if (span) span.textContent = slider.value;
         });
       }
     }
 
-    const blackCapture = document.getElementById('cpu-black-capture') as HTMLInputElement | null;
-    if (blackCapture) {
-      blackCapture.addEventListener('input', () => {
-        this.cpuSetBlackCapturePreference(parseInt(blackCapture.value) / 100);
+    // Speed slider display
+    const speedSlider2 = document.getElementById('cpu-speed') as HTMLInputElement | null;
+    const speedValue = document.getElementById('cpu-speed-value');
+    if (speedSlider2 && speedValue) {
+      speedSlider2.addEventListener('input', () => {
+        speedValue.textContent = `${speedSlider2.value}ms`;
       });
     }
 
@@ -2395,8 +2406,8 @@ timelines - list timelines`,
       html +=
         '<div class="move-pair">' +
         '<span class="move-number">' + num + '.</span>' +
-        '<span class="move">' + white + '</span>' +
-        '<span class="move">' + black + '</span></div>';
+        this._formatMoveWithTooltip(white) +
+        this._formatMoveWithTooltip(black) + '</div>';
     }
     // Only update DOM if content changed (avoids unnecessary re-renders)
     if (html !== this._lastMoveListHtml) {
@@ -2404,6 +2415,51 @@ timelines - list timelines`,
       movesEl.scrollTop = movesEl.scrollHeight;
       this._lastMoveListHtml = html;
     }
+  }
+
+  /** Format a move SAN with tooltips for cross-timeline/time-travel notation */
+  private _formatMoveWithTooltip(san: string): string {
+    if (!san) return '<span class="move"></span>';
+
+    // Cross-timeline moves: Qd4→T2 (piece moves TO timeline) or Qd4←T1 (piece arrives FROM timeline)
+    // Time travel moves: Qd4⟳T3 (departure) or Qd4⟳←T1 (arrival via time travel)
+    let tooltip = '';
+    let cssClass = 'move';
+
+    if (san.includes('⟳←T')) {
+      // Time travel arrival: piece arrived via time travel from another timeline
+      const match = san.match(/⟳←T(\d+)/);
+      if (match) {
+        tooltip = `Piece arrives via time travel from Timeline ${match[1]}`;
+        cssClass += ' time-travel';
+      }
+    } else if (san.includes('⟳T')) {
+      // Time travel departure: piece time travels to a past turn
+      const match = san.match(/⟳T(\d+)/);
+      if (match) {
+        tooltip = `Piece time travels to turn ${match[1]} (creates new timeline)`;
+        cssClass += ' time-travel';
+      }
+    } else if (san.includes('→T')) {
+      // Cross-timeline departure: piece moves TO another timeline
+      const match = san.match(/→T(\d+)/);
+      if (match) {
+        tooltip = `Piece moves TO Timeline ${match[1]}`;
+        cssClass += ' cross-timeline';
+      }
+    } else if (san.includes('←T')) {
+      // Cross-timeline arrival: piece arrives FROM another timeline
+      const match = san.match(/←T(\d+)/);
+      if (match) {
+        tooltip = `Piece arrives FROM Timeline ${match[1]}`;
+        cssClass += ' cross-timeline';
+      }
+    }
+
+    if (tooltip) {
+      return `<span class="${cssClass}" title="${tooltip}">${san}</span>`;
+    }
+    return `<span class="${cssClass}">${san}</span>`;
   }
 
   updateTimelineList(): void {
@@ -2743,9 +2799,13 @@ timelines - list timelines`,
   private cpuWhiteCapturePreference = 0.7;
   private cpuBlackCapturePreference = 0.7;
 
-  // Per-piece portal biases (per color)
-  private cpuWhitePortalBias: Record<string, number> = { q: 0.3, r: 0.2, b: 0.15, n: 0.1 };
-  private cpuBlackPortalBias: Record<string, number> = { q: 0.3, r: 0.2, b: 0.15, n: 0.1 };
+  // Per-piece portal biases (per color) - higher = more aggressive with 5D moves
+  private cpuWhitePortalBias: Record<string, number> = { q: 0.5, r: 0.4, b: 0.35, n: 0.3 };
+  private cpuBlackPortalBias: Record<string, number> = { q: 0.5, r: 0.4, b: 0.35, n: 0.3 };
+
+  // 5D Chess aggression settings
+  private cpuCrossTimelineChance = 0.6;  // Base chance for cross-timeline moves (0-1)
+  private cpuTimeTravelChance = 0.4;     // Base chance for time travel moves (0-1)
 
   // Stockfish settings
   private cpuUseStockfish = true;  // Use Stockfish when available
@@ -3301,12 +3361,11 @@ timelines - list timelines`,
       return b.bias - a.bias;
     });
 
-    // 5D Aggressive mode: much higher base chance for cross-timeline moves
-    // Base 60% chance for top strategic move, decreasing for lower-scored moves
+    // 5D Aggressive mode: use slider-controlled cross-timeline chance
     for (const opp of opportunities) {
-      // Strategic score boosts the chance significantly
-      const baseChance = 0.35; // Much higher than old 0.05 (0.1 * 0.5)
-      const strategicBonus = opp.strategicScore * 0.12; // Each strategic point adds 12%
+      // Base chance from slider, plus strategic bonus
+      const baseChance = this.cpuCrossTimelineChance;
+      const strategicBonus = opp.strategicScore * 0.10; // Each strategic point adds 10%
       const totalChance = Math.min(0.95, baseChance + strategicBonus);
 
       if (Math.random() < totalChance) {

@@ -83,9 +83,9 @@ body::-webkit-scrollbar {
     border-radius: 10px;
     text-align: center;
     border: 1px solid rgba(80, 80, 160, 0.25);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     letter-spacing: 0.02em;
 }
@@ -361,6 +361,21 @@ body::-webkit-scrollbar {
 .move {
     min-width: 3.5rem;
     white-space: nowrap;
+}
+
+/* Cross-timeline move notation with tooltips */
+.move[title] {
+    cursor: help;
+    position: relative;
+    border-bottom: 1px dotted rgba(136, 136, 187, 0.5);
+}
+
+.move.cross-timeline {
+    color: #aa88ff;
+}
+
+.move.time-travel {
+    color: #88ddaa;
 }
 
 #reset {
@@ -715,64 +730,25 @@ body::-webkit-scrollbar {
     color: #88ddff;
 }
 
-/* Stockfish CPU controls */
-.cpu-stockfish-controls {
-    background: rgba(50, 40, 70, 0.5);
+/* CPU Section styling */
+.cpu-section {
+    background: rgba(40, 40, 70, 0.4);
     border-radius: 6px;
     padding: 0.5rem;
     margin-top: 0.4rem;
-    border: 1px solid rgba(120, 80, 180, 0.3);
+    border: 1px solid rgba(80, 80, 120, 0.2);
 }
 
-.cpu-stockfish-header {
+.cpu-section-header {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    justify-content: space-between;
     margin-bottom: 0.4rem;
     font-size: 0.72rem;
     font-weight: 600;
 }
 
-.cpu-stockfish-icon {
-    font-size: 1rem;
-    filter: drop-shadow(0 0 2px rgba(180, 120, 255, 0.5));
-}
-
-.cpu-stockfish-toggle {
-    margin-left: auto;
-    padding: 0.2rem 0.5rem;
-    font-size: 0.65rem;
-    background: rgba(100, 60, 60, 0.4);
-    border: 1px solid rgba(160, 80, 80, 0.3);
-    border-radius: 4px;
-    color: #bb8888;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.cpu-stockfish-toggle.active {
-    background: rgba(80, 60, 120, 0.5);
-    border-color: rgba(140, 100, 200, 0.5);
-    color: #c8b0ff;
-}
-
-.cpu-stockfish-toggle.loading {
-    background: rgba(80, 80, 60, 0.4);
-    border-color: rgba(160, 160, 80, 0.3);
-    color: #bbbb88;
-}
-
-.cpu-stockfish-status {
-    font-size: 0.6rem;
-    color: #888;
-    margin-left: 0.3rem;
-}
-
-.cpu-stockfish-status.ready {
-    color: #88cc88;
-}
-
-.cpu-stockfish-controls label {
+.cpu-section label {
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -780,19 +756,67 @@ body::-webkit-scrollbar {
     margin-top: 0.25rem;
 }
 
-.cpu-stockfish-controls input[type="range"] {
+.cpu-section input[type="range"] {
     flex: 1;
     height: 4px;
 }
 
-.cpu-stockfish-controls span:last-child {
-    min-width: 1.5rem;
+.cpu-section span:last-child {
+    min-width: 2rem;
     text-align: right;
     font-size: 0.65rem;
     color: #aaa;
 }
 
-/* Per-color CPU controls */
+/* Stockfish CPU controls */
+.cpu-stockfish-controls {
+    background: rgba(50, 40, 70, 0.5);
+    border: 1px solid rgba(120, 80, 180, 0.3);
+}
+
+.cpu-stockfish-status {
+    font-size: 0.6rem;
+    color: #888;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    background: rgba(80, 80, 60, 0.4);
+}
+
+.cpu-stockfish-status.ready {
+    color: #88cc88;
+    background: rgba(60, 100, 60, 0.4);
+}
+
+.cpu-stockfish-status.error {
+    color: #cc8888;
+    background: rgba(100, 60, 60, 0.4);
+}
+
+/* 5D Chess controls */
+#cpu-5d-controls {
+    background: rgba(40, 50, 70, 0.5);
+    border: 1px solid rgba(80, 120, 180, 0.3);
+}
+
+/* Simplified color row */
+.cpu-color-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}
+
+.cpu-color-item {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(40, 40, 70, 0.4);
+    border-radius: 6px;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.7rem;
+}
+
+/* Per-color CPU controls (legacy, keeping for backwards compat) */
 .cpu-color-controls {
     background: rgba(40, 40, 70, 0.4);
     border-radius: 6px;
@@ -932,9 +956,8 @@ body::-webkit-scrollbar {
         font-size: 0.85rem;
         padding: 0.5rem;
         flex-shrink: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
 
     /* FEN display improvements for mobile - ensure visibility */
@@ -1011,9 +1034,8 @@ body::-webkit-scrollbar {
         font-size: 0.75rem;
         padding: 0.4rem;
         flex-shrink: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
     }
 
     /* Ensure FEN stays visible on very small screens */
