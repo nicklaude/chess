@@ -707,6 +707,7 @@ body::-webkit-scrollbar {
     align-items: center;
     font-size: 0.72rem;
     color: #8888bb;
+    white-space: nowrap;  /* Prevent text wrapping */
 }
 
 #cpu-controls input[type="range"] {
@@ -860,10 +861,12 @@ body::-webkit-scrollbar {
 }
 
 .cpu-section span:last-child {
-    min-width: 2rem;
+    min-width: 2.5rem;
+    width: 2.5rem;  /* Fixed width prevents layout shifts */
     text-align: right;
     font-size: 0.65rem;
     color: #aaa;
+    flex-shrink: 0;
 }
 
 /* Stockfish CPU controls */
