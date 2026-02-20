@@ -124,6 +124,12 @@ export interface ITimelineCol {
    * @returns true if no duplicates were found, false if duplicates were detected and fixed
    */
   validateNoDuplicates(): boolean;
+
+  /**
+   * Set 2D mode visibility for this timeline.
+   * Hides history layers and inter-layer lines for cleaner top-down view.
+   */
+  set2DMode(enabled: boolean): void;
 }
 
 // ===============================================================
@@ -162,4 +168,10 @@ export interface IBoard3D {
   toggleZoom(): void;
   getTimelineCount(): number;
   getSelectedBoardIndex(): number | null;
+
+  // 2D mode (top-down orthographic view)
+  toggle2DMode(): void;
+  set2DMode(enabled: boolean): void;
+  is2DMode(): boolean;
+  zoomOutShowAll(): void;
 }

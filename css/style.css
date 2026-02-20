@@ -658,6 +658,30 @@ body::-webkit-scrollbar {
     flex: 1;
 }
 
+#example-play {
+    padding: 0.75rem 0.5rem;
+    background: rgba(80, 60, 100, 0.6);
+    color: #e0d0ff;
+    border: 1px solid rgba(120, 80, 180, 0.4);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    flex: 0.8;
+}
+
+#example-play:hover {
+    background: rgba(100, 80, 140, 0.7);
+    border-color: rgba(160, 100, 200, 0.6);
+}
+
+#example-play.running {
+    background: rgba(140, 80, 80, 0.6);
+    border-color: rgba(180, 100, 100, 0.4);
+    color: #ffcccc;
+}
+
 /* CPU controls */
 #cpu-toggle {
     padding: 0.75rem;
@@ -822,6 +846,40 @@ body::-webkit-scrollbar {
     color: #88ddff;
 }
 
+#2d-mode-toggle {
+    width: 32px;
+    min-width: 32px;
+    height: auto;
+    padding: 0.4rem;
+    margin-top: 0.3rem;
+    font-size: 1rem;
+    line-height: 1;
+    background: rgba(60, 60, 100, 0.4);
+    border: 1px solid rgba(80, 80, 160, 0.3);
+    border-radius: 6px;
+    color: #8888bb;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#2d-mode-toggle svg {
+    width: 16px;
+    height: 16px;
+}
+
+#2d-mode-toggle:hover {
+    background: rgba(80, 80, 120, 0.5);
+}
+
+#2d-mode-toggle.active {
+    background: rgba(160, 120, 200, 0.3);
+    border-color: rgba(160, 120, 200, 0.5);
+    color: #dd88ff;
+}
+
 /* CPU Section styling */
 .cpu-section {
     background: rgba(40, 40, 70, 0.4);
@@ -891,6 +949,36 @@ body::-webkit-scrollbar {
 .cpu-stockfish-status.error {
     color: #cc8888;
     background: rgba(100, 60, 60, 0.4);
+}
+
+.cpu-stockfish-status.dumb {
+    color: #ffaa44;
+    background: rgba(100, 80, 40, 0.4);
+}
+
+.cpu-stockfish-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+#cpu-dumb-toggle {
+    background: rgba(60, 60, 100, 0.4);
+    border: 1px solid rgba(80, 80, 160, 0.3);
+    border-radius: 4px;
+    padding: 0.15rem 0.3rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+#cpu-dumb-toggle:hover {
+    background: rgba(80, 80, 120, 0.5);
+}
+
+#cpu-dumb-toggle.active {
+    background: rgba(180, 120, 60, 0.4);
+    border-color: rgba(200, 140, 80, 0.5);
 }
 
 /* Per-color skill sliders row */
@@ -1294,4 +1382,86 @@ body::-webkit-scrollbar {
     pointer-events: none;
     z-index: 1000;
     user-select: none;
+}
+
+/* Game End Toast */
+.game-end-toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, rgba(30, 30, 50, 0.95) 0%, rgba(20, 20, 40, 0.98) 100%);
+    border: 1px solid rgba(100, 100, 180, 0.4);
+    border-radius: 12px;
+    padding: 0;
+    min-width: 280px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 20px rgba(100, 100, 200, 0.2);
+    z-index: 2000;
+    animation: slideDown 0.3s ease-out;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.game-end-toast.fading {
+    animation: fadeOut 0.5s ease-out forwards;
+}
+
+@keyframes slideDown {
+    from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+    to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+.toast-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(100, 100, 180, 0.2);
+    background: rgba(60, 60, 100, 0.3);
+    border-radius: 12px 12px 0 0;
+}
+
+.toast-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.toast-close:hover {
+    color: #fff;
+}
+
+.toast-body {
+    padding: 12px 16px;
+}
+
+.toast-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.toast-stat span {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.toast-stat strong {
+    color: #88ccff;
 }

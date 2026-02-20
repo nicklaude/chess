@@ -512,6 +512,8 @@ export class TimelineCol implements ITimelineCol {
   private crossTimelineTargets: Mesh[] = [];  // Purple highlights for cross-timeline moves
   private timeTravelTargets: Mesh[] = [];     // Cyan-green portals for time travel moves
   private drawnBranchIndices: Set<number> = new Set();  // Track which snapshot indices have branches drawn
+  private _is2DMode = false;  // Track if 2D mode is active (hide history layers)
+  private _debugLabel: THREE.Sprite | null = null;  // Reference to debug label for hiding in 2D mode
 
   // Performance: track previous board state for diff-based rendering
   // Store as map of "row,col" -> "type,color" to detect what changed
@@ -689,6 +691,7 @@ export class TimelineCol implements ITimelineCol {
     sprite.position.set(0, 0.1, -5.5);
     sprite.scale.set(2.5, 0.625, 1);  // Wider than tall to match canvas aspect ratio
 
+    this._debugLabel = sprite;  // Store reference for 2D mode toggle
     this.group.add(sprite);
   }
 
@@ -1788,6 +1791,10 @@ export class TimelineCol implements ITimelineCol {
   addSnapshot(position: Board, moveFrom: string, moveTo: string, isWhite: boolean): void {
     const layerGroup = this._makeHistoryBoard(position);
     layerGroup.userData = { moveFrom, moveTo, isWhite };
+    // If in 2D mode, hide the new layer immediately
+    if (this._is2DMode) {
+      layerGroup.visible = false;
+    }
     this.historyLayers.unshift(layerGroup);
     this.group.add(layerGroup);
 
@@ -2115,6 +2122,42 @@ export class TimelineCol implements ITimelineCol {
     }
     this.scene.remove(this.group);
   }
+
+  /**
+   * Set 2D mode visibility for this timeline.
+   * In 2D mode, hide history layers and inter-layer lines for cleaner top-down view.
+   * Scale up pieces for better visibility in top-down view.
+   * Keep: board squares, pieces, move indicators, cross-timeline highlights.
+   */
+  set2DMode(enabled: boolean): void {
+    this._is2DMode = enabled;
+    // Toggle visibility of history layers
+    for (const layer of this.historyLayers) {
+      layer.visible = !enabled;
+    }
+    // Toggle inter-layer lines (the vertical connectors)
+    this.interLayerGroup.visible = !enabled;
+    // Hide debug label in 2D mode (prevents overlap with adjacent boards)
+    if (this._debugLabel) {
+      this._debugLabel.visible = !enabled;
+    }
+    // Keep move line group visible (blue/orange move indicators on board)
+    // this.moveLineGroup stays visible
+
+    // Scale pieces for 2D mode - larger and more prominent
+    const scale2D = 1.25;  // Bigger pieces for 2D top-down view (more prominent)
+    const scale3D = 0.88;  // Normal 3D scale
+    const targetScale = enabled ? scale2D : scale3D;
+
+    // Update all main board sprites
+    for (const sprite of this._spriteMap.values()) {
+      sprite.scale.set(targetScale, targetScale, targetScale);
+    }
+    // Also update pieceMeshes array (may have some sprites not in map during transitions)
+    for (const sprite of this.pieceMeshes) {
+      sprite.scale.set(targetScale, targetScale, targetScale);
+    }
+  }
 }
 
 // ===============================================================
@@ -2235,6 +2278,11 @@ class Board3DManager implements IBoard3D {
   // Zoom state for board focus
   private _zoomedIn = false;
   private _preZoomCameraState: { position: Vector3; target: Vector3 } | null = null;
+
+  // 2D mode state (top-down orthographic view)
+  private _is2DMode = false;
+  private _pre2DCameraState: { position: Vector3; target: Vector3 } | null = null;
+  private _pre2DBoardPositions: Map<number, number> = new Map(); // timeline id -> original xOffset
 
   // Visual effects storage
   private _activeEffects: Array<{
@@ -3814,6 +3862,183 @@ class Board3DManager implements IBoard3D {
    */
   getSelectedBoardIndex(): number | null {
     return this._selectedBoardIndex;
+  }
+
+  /**
+   * Toggle 2D mode (top-down orthographic view).
+   */
+  toggle2DMode(): void {
+    this.set2DMode(!this._is2DMode);
+  }
+
+  /**
+   * Set 2D mode on or off.
+   * In 2D mode, camera looks directly down at boards arranged in a grid layout.
+   */
+  set2DMode(enabled: boolean): void {
+    if (!this.camera || !this.controls) return;
+    if (this._is2DMode === enabled) return;
+
+    if (enabled) {
+      // Save current camera state
+      this._pre2DCameraState = {
+        position: this.camera.position.clone(),
+        target: this.controls.target.clone(),
+      };
+
+      const timelineIds = Object.keys(this.timelineCols).map(k => parseInt(k));
+      if (timelineIds.length === 0) return;
+
+      // Save original positions and rearrange into grid
+      this._pre2DBoardPositions.clear();
+      const boardSize = 8;
+      const gridSpacing = 9; // Tight spacing for 2D grid (just 1 unit gap between boards)
+      const numBoards = timelineIds.length;
+
+      // Calculate grid dimensions (prefer wider grids)
+      const cols = Math.ceil(Math.sqrt(numBoards * 1.5)); // Slightly wider than square
+      const rows = Math.ceil(numBoards / cols);
+
+      // Grid dimensions
+      const gridWidth = (cols - 1) * gridSpacing;
+      const gridDepth = (rows - 1) * gridSpacing;
+
+      // Sort timelines by original xOffset for consistent ordering
+      const sortedIds = timelineIds.sort((a, b) => {
+        const aX = this.timelineCols[a]?.xOffset ?? 0;
+        const bX = this.timelineCols[b]?.xOffset ?? 0;
+        return aX - bX;
+      });
+
+      // Position each board in grid
+      sortedIds.forEach((id, index) => {
+        const col = this.timelineCols[id];
+        if (!col) return;
+
+        // Save original position
+        this._pre2DBoardPositions.set(id, col.xOffset);
+
+        // Calculate grid position
+        const gridCol = index % cols;
+        const gridRow = Math.floor(index / cols);
+
+        // Center the grid
+        const newX = gridCol * gridSpacing - gridWidth / 2;
+        const newZ = gridRow * gridSpacing - gridDepth / 2;
+
+        // Update position
+        col.xOffset = newX;
+        col.group.position.x = newX;
+        col.group.position.z = newZ;
+      });
+
+      // Calculate camera position to see all boards
+      const aspect = (this.container?.clientWidth ?? 1) / (this.container?.clientHeight ?? 1);
+      const fov = 50 * (Math.PI / 180);
+      const halfFov = fov / 2;
+
+      // Calculate height needed to see the grid
+      const viewWidth = gridWidth + boardSize + 4;
+      const viewDepth = gridDepth + boardSize + 4;
+      const heightForWidth = (viewWidth / 2) / Math.tan(halfFov) / aspect;
+      const heightForDepth = (viewDepth / 2) / Math.tan(halfFov);
+      const height = Math.max(heightForWidth, heightForDepth, 25);
+
+      // Position camera above center
+      this.controls.target.set(0, 0, 0);
+      this.camera.position.set(0, height, 0.1);
+
+      // Restrict polar angle to near-vertical
+      this.controls.maxPolarAngle = 0.05;
+
+      // Hide 2D-irrelevant elements on all timelines
+      for (const id in this.timelineCols) {
+        this.timelineCols[id].set2DMode(true);
+      }
+      // Hide branch lines
+      if (this.branchLineGroup) {
+        this.branchLineGroup.visible = false;
+      }
+
+      this._is2DMode = true;
+      console.log(`[Board3D] 2D mode enabled: ${numBoards} boards in ${cols}x${rows} grid, height=${height.toFixed(1)}`);
+    } else {
+      // Restore board positions
+      for (const [id, originalX] of this._pre2DBoardPositions) {
+        const col = this.timelineCols[id];
+        if (col) {
+          col.xOffset = originalX;
+          col.group.position.x = originalX;
+          col.group.position.z = 0; // Reset Z back to 0
+        }
+      }
+      this._pre2DBoardPositions.clear();
+
+      // Restore previous camera state
+      if (this._pre2DCameraState) {
+        this.camera.position.copy(this._pre2DCameraState.position);
+        this.controls.target.copy(this._pre2DCameraState.target);
+        this._pre2DCameraState = null;
+      } else {
+        // Default 3D view
+        this.camera.position.set(0, 14, 12);
+        this.controls.target.set(0, 0, 0);
+      }
+
+      // Re-enable rotation
+      this.controls.maxPolarAngle = Math.PI * 0.85;
+
+      // Show all elements again
+      for (const id in this.timelineCols) {
+        this.timelineCols[id].set2DMode(false);
+      }
+      if (this.branchLineGroup) {
+        this.branchLineGroup.visible = true;
+      }
+
+      this._is2DMode = false;
+      console.log('[Board3D] 2D mode disabled: returning to 3D view');
+    }
+
+    this._needsRender = true;
+  }
+
+  /**
+   * Check if 2D mode is currently active.
+   */
+  is2DMode(): boolean {
+    return this._is2DMode;
+  }
+
+  /**
+   * Zoom out to show all boards (for game end or manual view).
+   * Similar to zoomOut() but doesn't restore previous camera state.
+   */
+  zoomOutShowAll(): void {
+    if (!this.camera || !this.controls) return;
+
+    const timelineIds = Object.keys(this.timelineCols).map(k => parseInt(k));
+    if (timelineIds.length === 0) return;
+
+    // Calculate center and extent of all boards
+    let minX = Infinity, maxX = -Infinity;
+    for (const id of timelineIds) {
+      const x = this.timelineCols[id]?.xOffset ?? 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+
+    const centerX = (minX + maxX) / 2;
+    const extent = maxX - minX;
+    // Position camera to see all boards with generous padding
+    const distance = Math.max(35, extent * 0.9 + 20);
+
+    this.controls.target.set(centerX, 0, 0);
+    this.camera.position.set(centerX, distance * 0.75, distance * 0.5);
+
+    this._zoomedIn = false;
+    this._needsRender = true;
+    console.log(`[Board3D] zoomOutShowAll: showing ${timelineIds.length} boards`);
   }
 }
 

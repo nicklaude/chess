@@ -30,22 +30,27 @@
             <div id="button-row">
                 <button id="reset">New Game</button>
                 <button id="cpu-toggle">Start CPU</button>
+                <button id="example-play" title="Run scripted example game">▶ Demo</button>
             </div>
             <div id="cpu-controls">
                 <!-- Basic Settings with Camera Toggle -->
                 <div class="cpu-section cpu-sliders-row">
                     <div class="cpu-sliders">
-                        <label>Speed: <input type="range" id="cpu-speed" min="100" max="2000" value="400" step="100"><span id="cpu-speed-value">400ms</span></label>
+                        <label>Speed: <input type="range" id="cpu-speed" min="100" max="2000" value="400" step="100"><span id="cpu-speed-value">1700ms</span></label>
                         <label>Max Timelines: <input type="range" id="max-timelines" min="5" max="100" value="5" step="5"><span id="max-timelines-value">5</span></label>
                     </div>
                     <button id="cpu-camera-toggle" class="active" title="Toggle camera follow"><i data-lucide="camera"></i></button>
+                    <button id="2d-mode-toggle" title="Toggle 2D top-down view (T)"><i data-lucide="layout-grid"></i></button>
                 </div>
 
                 <!-- Stockfish Engine -->
                 <div id="cpu-stockfish-controls" class="cpu-section cpu-stockfish-controls">
                     <div class="cpu-section-header">
                         <span><i data-lucide="brain"></i> Stockfish AI</span>
-                        <span id="cpu-stockfish-status" class="cpu-stockfish-status">Loading...</span>
+                        <div class="cpu-stockfish-toggle">
+                            <button id="cpu-dumb-toggle" title="Toggle dumb mode (random moves)">🎲</button>
+                            <span id="cpu-stockfish-status" class="cpu-stockfish-status">Loading...</span>
+                        </div>
                     </div>
                     <div class="cpu-skill-row">
                         <label><span class="cpu-color-dot white"></span>Skill: <input type="range" id="cpu-stockfish-skill-white" min="0" max="20" value="10" step="1"><span id="cpu-stockfish-skill-white-value">10</span></label>
@@ -110,6 +115,7 @@
                     <div class="shortcut-row"><span class="key">Z</span> Zoom in</div>
                     <div class="shortcut-row"><span class="key">X</span> Zoom out</div>
                     <div class="shortcut-row"><span class="key">V</span> Toggle zoom</div>
+                    <div class="shortcut-row"><span class="key">T</span> Toggle 2D view</div>
                 </div>
             </div>
             <div id="sidebar-footer">

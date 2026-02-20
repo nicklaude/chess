@@ -100,6 +100,9 @@ class GameManager {
     // Setup collapsible shortcuts panel
     this._setupCollapsibleShortcuts();
 
+    // Setup example play button
+    this._setupExamplePlay();
+
     // Register callback to update UI when Stockfish becomes ready
     stockfish.onReady(() => {
       this._updateCpuUI();
@@ -107,6 +110,100 @@ class GameManager {
 
     // Initial CPU UI update (will show loading state if not ready)
     this._updateCpuUI();
+  }
+
+  /* -- Example Play (Demo Mode) -- */
+  private _examplePlaying = false;
+  private _exampleTimer: number | null = null;
+
+  private _setupExamplePlay(): void {
+    const btn = document.getElementById('example-play');
+    if (btn) {
+      btn.addEventListener('click', () => this._toggleExamplePlay());
+    }
+  }
+
+  private _toggleExamplePlay(): void {
+    if (this._examplePlaying) {
+      this._stopExamplePlay();
+    } else {
+      this._startExamplePlay();
+    }
+  }
+
+  private _startExamplePlay(): void {
+    // Reset first
+    this.reset();
+    this._examplePlaying = true;
+
+    const btn = document.getElementById('example-play');
+    if (btn) {
+      btn.classList.add('running');
+      btn.textContent = '⏹ Stop';
+    }
+
+    // Example game: Fool's Mate - the fastest possible checkmate (2 moves)
+    // This demonstrates a quick checkmate for testing purposes
+    // After checkmate, CPU takes over to continue playing on other timelines
+    const moves = [
+      // Fool's Mate sequence - Black wins in 4 half-moves
+      { from: 'f2', to: 'f3' },   // 1. f3 (weakens king position)
+      { from: 'e7', to: 'e5' },   // 1... e5
+      { from: 'g2', to: 'g4' },   // 2. g4?? (blunder - exposes king diagonal)
+      { from: 'd8', to: 'h4' },   // 2... Qh4# (checkmate!)
+    ];
+
+    let moveIndex = 0;
+    const playNextMove = () => {
+      if (!this._examplePlaying || moveIndex >= moves.length) {
+        // After main moves, start CPU to finish the game
+        if (this._examplePlaying) {
+          // Enable dumb mode for fast finish
+          this.cpuUseStockfish = false;
+          this._updateCpuUI();
+          this.cpuStart();
+        }
+        return;
+      }
+
+      const move = moves[moveIndex];
+      const tl = this.timelines[this.activeTimelineId];
+      if (tl) {
+        try {
+          // Find the valid chess move from the position
+          const validMoves = tl.chess.moves({ verbose: true }) as ChessMove[];
+          const chessMove = validMoves.find(m => m.from === move.from && m.to === move.to);
+          if (chessMove) {
+            this.makeMove(this.activeTimelineId, chessMove);
+          } else {
+            console.warn('[ExamplePlay] Move not found in legal moves:', move);
+          }
+        } catch (e) {
+          console.warn('[ExamplePlay] Move failed:', move, e);
+        }
+      }
+
+      moveIndex++;
+      this._exampleTimer = window.setTimeout(playNextMove, 300);
+    };
+
+    // Start playing
+    this._exampleTimer = window.setTimeout(playNextMove, 200);
+  }
+
+  private _stopExamplePlay(): void {
+    this._examplePlaying = false;
+    if (this._exampleTimer !== null) {
+      clearTimeout(this._exampleTimer);
+      this._exampleTimer = null;
+    }
+    this.cpuStop();
+
+    const btn = document.getElementById('example-play');
+    if (btn) {
+      btn.classList.remove('running');
+      btn.textContent = '▶ Demo';
+    }
   }
 
   /* -- Keyboard Navigation -- */
@@ -198,6 +295,13 @@ class GameManager {
           e.preventDefault();
           Board3D.toggleZoom();
           break;
+        // T key to toggle 2D top-down mode
+        case 't':
+        case 'T':
+          e.preventDefault();
+          Board3D.toggle2DMode();
+          this._update2DButtonUI();
+          break;
       }
     });
   }
@@ -246,8 +350,9 @@ class GameManager {
     const speedSlider = document.getElementById('cpu-speed') as HTMLInputElement | null;
     if (speedSlider) {
       speedSlider.addEventListener('input', () => {
-        // Invert: slider shows 100-2000, but we want higher slider = faster (lower delay)
-        // So delay = 2100 - sliderValue (100->2000, 2000->100)
+        // Direct mapping: slider value = delay (right side = higher value = slower)
+        // Actually want: right = faster = lower delay
+        // So invert: delay = 2100 - sliderValue
         const sliderVal = parseInt(speedSlider.value);
         this.cpuSetDelay(2100 - sliderVal);
       });
@@ -270,6 +375,15 @@ class GameManager {
       cameraToggle.addEventListener('click', () => {
         this.cpuCameraFollow = !this.cpuCameraFollow;
         this._updateCpuUI();
+      });
+    }
+
+    // 2D mode toggle button
+    const mode2DToggle = document.getElementById('2d-mode-toggle');
+    if (mode2DToggle) {
+      mode2DToggle.addEventListener('click', () => {
+        Board3D.toggle2DMode();
+        this._update2DButtonUI();
       });
     }
 
@@ -328,12 +442,14 @@ class GameManager {
       }
     }
 
-    // Speed slider display
+    // Speed slider display - show actual delay (inverted from slider value)
     const speedSlider2 = document.getElementById('cpu-speed') as HTMLInputElement | null;
     const speedValue = document.getElementById('cpu-speed-value');
     if (speedSlider2 && speedValue) {
       speedSlider2.addEventListener('input', () => {
-        speedValue.textContent = `${speedSlider2.value}ms`;
+        // Show actual delay: slider 100 = 2000ms delay (slow), slider 2000 = 100ms delay (fast)
+        const actualDelay = 2100 - parseInt(speedSlider2.value);
+        speedValue.textContent = `${actualDelay}ms`;
       });
     }
 
@@ -360,6 +476,15 @@ class GameManager {
     const sfToggle = document.getElementById('cpu-stockfish-toggle');
     if (sfToggle) {
       sfToggle.addEventListener('click', () => this.toggleStockfish());
+    }
+
+    // Dumb CPU mode toggle (random moves instead of Stockfish)
+    const dumbToggle = document.getElementById('cpu-dumb-toggle');
+    if (dumbToggle) {
+      dumbToggle.addEventListener('click', () => {
+        this.cpuUseStockfish = !this.cpuUseStockfish;
+        this._updateCpuUI();
+      });
     }
 
     // Per-color skill sliders
@@ -2744,6 +2869,117 @@ timelines - list timelines`,
     return 'draw';
   }
 
+  /**
+   * Handle game end - zoom out to show all boards and display stats toast.
+   */
+  private _handleGameEnd(): void {
+    // Zoom out camera to show all boards
+    Board3D.zoomOutShowAll();
+
+    // Gather game stats
+    const stats = this._getGameEndStats();
+
+    // Display toast notification
+    this._showGameEndToast(stats);
+  }
+
+  /**
+   * Get game end statistics.
+   */
+  private _getGameEndStats(): {
+    winner: 'white' | 'black' | 'draw';
+    totalTimelines: number;
+    whiteWins: number;
+    blackWins: number;
+    draws: number;
+    totalMoves: number;
+  } {
+    let whiteWins = 0;
+    let blackWins = 0;
+    let draws = 0;
+    let totalMoves = 0;
+
+    for (const key in this.timelines) {
+      const tl = this.timelines[parseInt(key)];
+      totalMoves += tl.chess.history().length;
+
+      if (tl.chess.in_checkmate()) {
+        if (tl.chess.turn() === 'w') blackWins++;
+        else whiteWins++;
+      } else {
+        draws++;
+      }
+    }
+
+    const winner = this.getGlobalWinner() || 'draw';
+
+    return {
+      winner,
+      totalTimelines: Object.keys(this.timelines).length,
+      whiteWins,
+      blackWins,
+      draws,
+      totalMoves,
+    };
+  }
+
+  /**
+   * Show game end toast notification.
+   */
+  private _showGameEndToast(stats: ReturnType<typeof this._getGameEndStats>): void {
+    // Remove any existing toast
+    const existingToast = document.getElementById('game-end-toast');
+    if (existingToast) existingToast.remove();
+
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.id = 'game-end-toast';
+    toast.className = 'game-end-toast';
+
+    // Determine winner text and emoji
+    let winnerText: string;
+    let winnerEmoji: string;
+    if (stats.winner === 'white') {
+      winnerText = 'White Wins!';
+      winnerEmoji = '⚪';
+    } else if (stats.winner === 'black') {
+      winnerText = 'Black Wins!';
+      winnerEmoji = '⚫';
+    } else {
+      winnerText = 'Draw!';
+      winnerEmoji = '🤝';
+    }
+
+    toast.innerHTML = `
+      <div class="toast-header">
+        <span class="toast-title">${winnerEmoji} ${winnerText}</span>
+        <button class="toast-close" onclick="this.parentElement.parentElement.remove()">×</button>
+      </div>
+      <div class="toast-body">
+        <div class="toast-stat"><span>Timelines:</span> <strong>${stats.totalTimelines}</strong></div>
+        <div class="toast-stat"><span>White wins:</span> <strong>${stats.whiteWins}</strong></div>
+        <div class="toast-stat"><span>Black wins:</span> <strong>${stats.blackWins}</strong></div>
+        <div class="toast-stat"><span>Draws:</span> <strong>${stats.draws}</strong></div>
+        <div class="toast-stat"><span>Total moves:</span> <strong>${stats.totalMoves}</strong></div>
+      </div>
+    `;
+
+    document.body.appendChild(toast);
+
+    // Auto-fade after 10 seconds (but stays if user hovers)
+    setTimeout(() => {
+      if (toast.matches(':hover')) {
+        toast.addEventListener('mouseleave', () => toast.classList.add('fading'), { once: true });
+      } else {
+        toast.classList.add('fading');
+      }
+    }, 10000);
+
+    toast.addEventListener('animationend', (e) => {
+      if (e.animationName === 'fadeOut') toast.remove();
+    });
+  }
+
   /* -- FEN Logging System (Phase 2) -- */
 
   /**
@@ -2956,6 +3192,7 @@ timelines - list timelines`,
     if (this._cpuIsGameOver()) {
       console.log('[CPU] All timelines finished - stopping CPU');
       this.cpuStop();
+      this._handleGameEnd();
       return;
     }
 
@@ -3569,17 +3806,39 @@ timelines - list timelines`,
       blackToggle.classList.toggle('active', this.cpuBlackEnabled);
     }
 
-    // Update Stockfish status
+    // Update Stockfish status and dumb mode toggle
     const stockfishStatus = document.getElementById('cpu-stockfish-status');
+    const dumbToggle = document.getElementById('cpu-dumb-toggle');
     if (stockfishStatus) {
-      if (stockfish.available) {
+      if (!this.cpuUseStockfish) {
+        stockfishStatus.textContent = 'Dumb Mode';
+        stockfishStatus.classList.remove('ready');
+        stockfishStatus.classList.add('dumb');
+      } else if (stockfish.available) {
         stockfishStatus.textContent = 'Ready';
         stockfishStatus.classList.add('ready');
-        stockfishStatus.classList.remove('error');
+        stockfishStatus.classList.remove('error', 'dumb');
       } else {
         stockfishStatus.textContent = 'Loading...';
-        stockfishStatus.classList.remove('ready', 'error');
+        stockfishStatus.classList.remove('ready', 'error', 'dumb');
       }
+    }
+    if (dumbToggle) {
+      dumbToggle.classList.toggle('active', !this.cpuUseStockfish);
+      dumbToggle.title = this.cpuUseStockfish ? 'Using Stockfish (click for random moves)' : 'Using random moves (click for Stockfish)';
+    }
+
+    // Update 2D mode button
+    this._update2DButtonUI();
+  }
+
+  /** Update 2D mode button UI state */
+  private _update2DButtonUI(): void {
+    const btn = document.getElementById('2d-mode-toggle');
+    if (btn) {
+      const is2D = Board3D.is2DMode();
+      btn.title = is2D ? '2D view: ON (click for 3D)' : '2D view: OFF (click for 2D)';
+      btn.classList.toggle('active', is2D);
     }
   }
 
