@@ -21,6 +21,7 @@ export class StockfishManager {
   private pendingResolve: ((move: StockfishMove | null) => void) | null = null;
   private _skillLevel = 10; // 0-20, default middle
   private _searchDepth = 10; // 1-20, default reasonable depth
+  private _onReadyCallbacks: (() => void)[] = [];
 
   constructor() {
     // Load Stockfish on construction
@@ -28,7 +29,32 @@ export class StockfishManager {
   }
 
   /**
-   * Load the Stockfish engine from CDN as a Web Worker
+   * Register a callback to be called when the engine becomes ready
+   */
+  onReady(callback: () => void): void {
+    if (this.isReady) {
+      callback();
+    } else {
+      this._onReadyCallbacks.push(callback);
+    }
+  }
+
+  /**
+   * Notify all registered callbacks that the engine is ready
+   */
+  private _notifyReady(): void {
+    for (const cb of this._onReadyCallbacks) {
+      try {
+        cb();
+      } catch (e) {
+        console.error('[Stockfish] onReady callback error:', e);
+      }
+    }
+    this._onReadyCallbacks = [];
+  }
+
+  /**
+   * Load the Stockfish engine as a Web Worker with proper WASM path resolution
    */
   async loadEngine(): Promise<boolean> {
     if (this.worker) {
@@ -53,16 +79,13 @@ export class StockfishManager {
     this.isLoading = true;
 
     try {
-      // Create a Web Worker from the stockfish CDN URL
-      // Using the single-threaded version for broad browser compatibility
-      const workerUrl = 'https://cdn.jsdelivr.net/npm/stockfish@16/src/stockfish-nnue-16-single.js';
+      // Create the worker using the wrapper script that handles WASM path resolution
+      // The wrapper script uses self.location.href to determine the base URL
+      // which works correctly when loaded from a direct file path
+      const workerUrl = new URL('lib/stockfish-worker.js', window.location.href).href;
+      console.log('[Stockfish] Creating worker from:', workerUrl);
 
-      // Create inline worker that loads stockfish from CDN
-      const blob = new Blob([`
-        importScripts('${workerUrl}');
-      `], { type: 'application/javascript' });
-
-      this.worker = new Worker(URL.createObjectURL(blob));
+      this.worker = new Worker(workerUrl);
 
       // Setup message handler
       this.worker.onmessage = (e) => this.handleMessage(String(e.data));
@@ -94,6 +117,10 @@ export class StockfishManager {
 
       console.log('[Stockfish] Engine loaded and ready');
       this.isLoading = false;
+
+      // Notify any registered callbacks
+      this._notifyReady();
+
       return true;
     } catch (error) {
       console.error('[Stockfish] Failed to load engine:', error);

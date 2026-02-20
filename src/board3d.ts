@@ -2215,7 +2215,8 @@ class Board3DManager implements IBoard3D {
   private _boundResize: (() => void) | null = null;
   private _boundKeyDown: ((e: KeyboardEvent) => void) | null = null;
   private _boundKeyUp: ((e: KeyboardEvent) => void) | null = null;
-  private _boundBeforeUnload: (() => void) | null = null;
+  private _boundPageHide: ((e: PageTransitionEvent) => void) | null = null;
+  private _boundVisibilityChange: (() => void) | null = null;
   private _boundContextLost: ((e: Event) => void) | null = null;
   private _boundContextRestored: (() => void) | null = null;
 
@@ -2430,7 +2431,35 @@ class Board3DManager implements IBoard3D {
     this._boundResize = () => this._scheduleResize();
     this._boundKeyDown = (e: KeyboardEvent) => this._onKeyDown(e);
     this._boundKeyUp = (e: KeyboardEvent) => this._onKeyUp(e);
-    // beforeunload handler removed - was blocking tab close by calling dispose() synchronously
+
+    // Fast cleanup handlers for tab close/navigation
+    // Use pagehide instead of beforeunload to avoid blocking tab close
+    this._boundPageHide = (e: PageTransitionEvent) => {
+      // If not persisted (bfcache), dispose immediately
+      if (!e.persisted) {
+        this._disposed = true;
+        if (this._animationFrameId !== null) {
+          cancelAnimationFrame(this._animationFrameId);
+          this._animationFrameId = null;
+        }
+      }
+    };
+
+    // Pause animation when tab is hidden to save resources
+    this._boundVisibilityChange = () => {
+      if (document.hidden) {
+        // Stop animation loop while hidden
+        this._disposed = true;
+        if (this._animationFrameId !== null) {
+          cancelAnimationFrame(this._animationFrameId);
+          this._animationFrameId = null;
+        }
+      } else if (this._disposed && !document.hidden) {
+        // Resume animation loop when tab becomes visible again
+        this._disposed = false;
+        this._animate();
+      }
+    };
 
     this.renderer.domElement.addEventListener('pointerdown', this._boundPointerDown);
     this.renderer.domElement.addEventListener('pointerup', this._boundPointerUp);
@@ -2450,8 +2479,11 @@ class Board3DManager implements IBoard3D {
     window.addEventListener('keydown', this._boundKeyDown);
     window.addEventListener('keyup', this._boundKeyUp);
 
-    // NOTE: Removed beforeunload handler - calling dispose() synchronously blocks tab close.
-    // Browser will free all resources automatically when tab closes anyway.
+    // Tab close/navigation cleanup - use pagehide for fast, non-blocking cleanup
+    window.addEventListener('pagehide', this._boundPageHide);
+
+    // Pause/resume when tab visibility changes (saves resources)
+    document.addEventListener('visibilitychange', this._boundVisibilityChange);
 
     // Ensure initial render happens after all setup is complete
     this._needsRender = true;
@@ -3573,8 +3605,11 @@ class Board3DManager implements IBoard3D {
     if (this._boundKeyUp) {
       window.removeEventListener('keyup', this._boundKeyUp);
     }
-    if (this._boundBeforeUnload) {
-      window.removeEventListener('beforeunload', this._boundBeforeUnload);
+    if (this._boundPageHide) {
+      window.removeEventListener('pagehide', this._boundPageHide);
+    }
+    if (this._boundVisibilityChange) {
+      document.removeEventListener('visibilitychange', this._boundVisibilityChange);
     }
     // Remove WebGL context loss handlers
     if (this.renderer?.domElement) {
@@ -3593,7 +3628,8 @@ class Board3DManager implements IBoard3D {
     this._boundResize = null;
     this._boundKeyDown = null;
     this._boundKeyUp = null;
-    this._boundBeforeUnload = null;
+    this._boundPageHide = null;
+    this._boundVisibilityChange = null;
     this._boundContextLost = null;
     this._boundContextRestored = null;
 

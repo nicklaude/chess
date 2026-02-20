@@ -99,6 +99,14 @@ class GameManager {
 
     // Setup collapsible shortcuts panel
     this._setupCollapsibleShortcuts();
+
+    // Register callback to update UI when Stockfish becomes ready
+    stockfish.onReady(() => {
+      this._updateCpuUI();
+    });
+
+    // Initial CPU UI update (will show loading state if not ready)
+    this._updateCpuUI();
   }
 
   /* -- Keyboard Navigation -- */
@@ -3425,7 +3433,8 @@ timelines - list timelines`,
 
     const cameraBtn = document.getElementById('cpu-camera-toggle');
     if (cameraBtn) {
-      cameraBtn.textContent = this.cpuCameraFollow ? 'Camera Follow: ON' : 'Camera Follow: OFF';
+      // Keep the emoji icon, just update tooltip and active state
+      cameraBtn.title = this.cpuCameraFollow ? 'Camera follow: ON (click to disable)' : 'Camera follow: OFF (click to enable)';
       cameraBtn.classList.toggle('active', this.cpuCameraFollow);
     }
 
@@ -3441,20 +3450,17 @@ timelines - list timelines`,
       blackToggle.classList.toggle('active', this.cpuBlackEnabled);
     }
 
-    // Update Stockfish toggle
-    const sfToggle = document.getElementById('cpu-stockfish-toggle');
-    if (sfToggle) {
-      const available = stockfish.available;
-      sfToggle.textContent = this.cpuUseStockfish ? (available ? 'ON' : 'Loading...') : 'OFF';
-      sfToggle.classList.toggle('active', this.cpuUseStockfish && available);
-      sfToggle.classList.toggle('loading', this.cpuUseStockfish && !available);
-    }
-
-    // Update Stockfish status indicator
-    const sfStatus = document.getElementById('cpu-stockfish-status');
-    if (sfStatus) {
-      sfStatus.textContent = stockfish.available ? 'Ready' : 'Not loaded';
-      sfStatus.classList.toggle('ready', stockfish.available);
+    // Update Stockfish status
+    const stockfishStatus = document.getElementById('cpu-stockfish-status');
+    if (stockfishStatus) {
+      if (stockfish.available) {
+        stockfishStatus.textContent = 'Ready';
+        stockfishStatus.classList.add('ready');
+        stockfishStatus.classList.remove('error');
+      } else {
+        stockfishStatus.textContent = 'Loading...';
+        stockfishStatus.classList.remove('ready', 'error');
+      }
     }
   }
 
