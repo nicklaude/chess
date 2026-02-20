@@ -2406,8 +2406,8 @@ timelines - list timelines`,
       html +=
         '<div class="move-pair">' +
         '<span class="move-number">' + num + '.</span>' +
-        '<span class="move">' + white + '</span>' +
-        '<span class="move">' + black + '</span></div>';
+        this._formatMoveWithTooltip(white) +
+        this._formatMoveWithTooltip(black) + '</div>';
     }
     // Only update DOM if content changed (avoids unnecessary re-renders)
     if (html !== this._lastMoveListHtml) {
@@ -2415,6 +2415,51 @@ timelines - list timelines`,
       movesEl.scrollTop = movesEl.scrollHeight;
       this._lastMoveListHtml = html;
     }
+  }
+
+  /** Format a move SAN with tooltips for cross-timeline/time-travel notation */
+  private _formatMoveWithTooltip(san: string): string {
+    if (!san) return '<span class="move"></span>';
+
+    // Cross-timeline moves: Qd4→T2 (piece moves TO timeline) or Qd4←T1 (piece arrives FROM timeline)
+    // Time travel moves: Qd4⟳T3 (departure) or Qd4⟳←T1 (arrival via time travel)
+    let tooltip = '';
+    let cssClass = 'move';
+
+    if (san.includes('⟳←T')) {
+      // Time travel arrival: piece arrived via time travel from another timeline
+      const match = san.match(/⟳←T(\d+)/);
+      if (match) {
+        tooltip = `Piece arrives via time travel from Timeline ${match[1]}`;
+        cssClass += ' time-travel';
+      }
+    } else if (san.includes('⟳T')) {
+      // Time travel departure: piece time travels to a past turn
+      const match = san.match(/⟳T(\d+)/);
+      if (match) {
+        tooltip = `Piece time travels to turn ${match[1]} (creates new timeline)`;
+        cssClass += ' time-travel';
+      }
+    } else if (san.includes('→T')) {
+      // Cross-timeline departure: piece moves TO another timeline
+      const match = san.match(/→T(\d+)/);
+      if (match) {
+        tooltip = `Piece moves TO Timeline ${match[1]}`;
+        cssClass += ' cross-timeline';
+      }
+    } else if (san.includes('←T')) {
+      // Cross-timeline arrival: piece arrives FROM another timeline
+      const match = san.match(/←T(\d+)/);
+      if (match) {
+        tooltip = `Piece arrives FROM Timeline ${match[1]}`;
+        cssClass += ' cross-timeline';
+      }
+    }
+
+    if (tooltip) {
+      return `<span class="${cssClass}" title="${tooltip}">${san}</span>`;
+    }
+    return `<span class="${cssClass}">${san}</span>`;
   }
 
   updateTimelineList(): void {
