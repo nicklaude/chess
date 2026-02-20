@@ -354,14 +354,27 @@ class GameManager {
       sfToggle.addEventListener('click', () => this.toggleStockfish());
     }
 
-    const sfSkillSlider = document.getElementById('cpu-stockfish-skill') as HTMLInputElement | null;
-    const sfSkillValue = document.getElementById('cpu-stockfish-skill-value');
-    if (sfSkillSlider) {
-      sfSkillSlider.addEventListener('input', () => {
-        const val = parseInt(sfSkillSlider.value);
-        this.setStockfishSkill(val);
-        if (sfSkillValue) {
-          sfSkillValue.textContent = val.toString();
+    // Per-color skill sliders
+    const sfSkillWhiteSlider = document.getElementById('cpu-stockfish-skill-white') as HTMLInputElement | null;
+    const sfSkillWhiteValue = document.getElementById('cpu-stockfish-skill-white-value');
+    if (sfSkillWhiteSlider) {
+      sfSkillWhiteSlider.addEventListener('input', () => {
+        const val = parseInt(sfSkillWhiteSlider.value);
+        this.setStockfishSkillWhite(val);
+        if (sfSkillWhiteValue) {
+          sfSkillWhiteValue.textContent = val.toString();
+        }
+      });
+    }
+
+    const sfSkillBlackSlider = document.getElementById('cpu-stockfish-skill-black') as HTMLInputElement | null;
+    const sfSkillBlackValue = document.getElementById('cpu-stockfish-skill-black-value');
+    if (sfSkillBlackSlider) {
+      sfSkillBlackSlider.addEventListener('input', () => {
+        const val = parseInt(sfSkillBlackSlider.value);
+        this.setStockfishSkillBlack(val);
+        if (sfSkillBlackValue) {
+          sfSkillBlackValue.textContent = val.toString();
         }
       });
     }
@@ -2836,7 +2849,8 @@ timelines - list timelines`,
 
   // Stockfish settings
   private cpuUseStockfish = true;  // Use Stockfish when available
-  private cpuStockfishSkill = 10;  // Skill level 0-20
+  private cpuStockfishSkillWhite = 10;  // Skill level 0-20 for White
+  private cpuStockfishSkillBlack = 10;  // Skill level 0-20 for Black
   private cpuStockfishDepth = 10;  // Search depth 1-20
 
   /** Start CPU auto-play mode */
@@ -3143,11 +3157,14 @@ timelines - list timelines`,
     fen: string,
     moves: ChessMove[],
     capturePreference: number,
-    _isWhite: boolean
+    isWhite: boolean
   ): Promise<ChessMove | null> {
     // Try Stockfish first if enabled
     if (this.cpuUseStockfish && stockfish.available) {
       try {
+        // Set skill level based on whose turn it is
+        const skillLevel = isWhite ? this.cpuStockfishSkillWhite : this.cpuStockfishSkillBlack;
+        stockfish.setSkillLevel(skillLevel);
         const sfMove = await stockfish.getBestMove(fen, this.cpuStockfishDepth);
         if (sfMove) {
           // Find matching move in legal moves list
@@ -3483,10 +3500,14 @@ timelines - list timelines`,
     }
   }
 
-  /** Set Stockfish skill level (0-20) */
-  setStockfishSkill(level: number): void {
-    this.cpuStockfishSkill = Math.max(0, Math.min(20, level));
-    stockfish.setSkillLevel(this.cpuStockfishSkill);
+  /** Set Stockfish skill level for White (0-20). Applied dynamically per-move in _selectCpuMove. */
+  setStockfishSkillWhite(level: number): void {
+    this.cpuStockfishSkillWhite = Math.max(0, Math.min(20, level));
+  }
+
+  /** Set Stockfish skill level for Black (0-20). Applied dynamically per-move in _selectCpuMove. */
+  setStockfishSkillBlack(level: number): void {
+    this.cpuStockfishSkillBlack = Math.max(0, Math.min(20, level));
   }
 
   /** Set Stockfish search depth (1-20) */

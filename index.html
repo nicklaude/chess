@@ -47,7 +47,10 @@
                         <span>🧠 Stockfish AI</span>
                         <span id="cpu-stockfish-status" class="cpu-stockfish-status">Loading...</span>
                     </div>
-                    <label>Skill: <input type="range" id="cpu-stockfish-skill" min="0" max="20" value="10" step="1"><span id="cpu-stockfish-skill-value">10</span></label>
+                    <div class="cpu-skill-row">
+                        <label><span class="cpu-color-dot white"></span>Skill: <input type="range" id="cpu-stockfish-skill-white" min="0" max="20" value="10" step="1"><span id="cpu-stockfish-skill-white-value">10</span></label>
+                        <label><span class="cpu-color-dot black"></span>Skill: <input type="range" id="cpu-stockfish-skill-black" min="0" max="20" value="10" step="1"><span id="cpu-stockfish-skill-black-value">10</span></label>
+                    </div>
                     <label>Depth: <input type="range" id="cpu-stockfish-depth" min="1" max="20" value="10" step="1"><span id="cpu-stockfish-depth-value">10</span></label>
                 </div>
 
@@ -112,7 +115,7 @@
             <div id="sidebar-footer">
                 <span id="fps-counter">-- FPS</span>
                 <span id="ghost-counter" title="MANDATORY_SYNC ghost removals this session">0</span>
-                <span id="version-info">v0.2.90</span>
+                <span id="version-info">v0.2.89</span>
             </div>
         </div>
     </div>

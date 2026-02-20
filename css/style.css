@@ -877,6 +877,23 @@ body::-webkit-scrollbar {
     background: rgba(100, 60, 60, 0.4);
 }
 
+/* Per-color skill sliders row */
+.cpu-skill-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.cpu-skill-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.cpu-skill-row .cpu-color-dot {
+    flex-shrink: 0;
+}
+
 /* 5D Chess controls */
 #cpu-5d-controls {
     background: rgba(40, 50, 70, 0.5);
