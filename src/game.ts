@@ -3192,26 +3192,43 @@ timelines - list timelines`,
     return null;
   }
 
-  /** Check if CPU has a cross-timeline opportunity on this timeline */
+  /**
+   * 5D-Aware CPU: Check for cross-timeline opportunities with strategic evaluation.
+   * Considers board evaluations across ALL timelines to decide when to cross.
+   */
   private _cpuCheckCrossTimeline(tlId: number): { targetTimelineId: number; square: Square; piece: Piece; isCapture: boolean } | null {
     const tl = this.timelines[tlId];
     if (!tl) return null;
 
+    const timelineIds = Object.keys(this.timelines).map(Number);
     // Need at least 2 timelines to cross
-    if (Object.keys(this.timelines).length < 2) return null;
+    if (timelineIds.length < 2) return null;
 
     const color = tl.chess.turn();
     const board = tl.chess.board();
     const isWhite = color === 'w';
     const portalBiases = isWhite ? this.cpuWhitePortalBias : this.cpuBlackPortalBias;
 
-    // Collect all cross-timeline opportunities
+    // 5D AWARENESS: Evaluate material balance on all timelines
+    const timelineEvals: Record<number, number> = {};
+    for (const id of timelineIds) {
+      const timeline = this.timelines[id];
+      if (timeline) {
+        timelineEvals[id] = this._evaluateMaterialBalance(timeline.chess, color);
+      }
+    }
+
+    // Current board evaluation (positive = winning, negative = losing)
+    const sourceEval = timelineEvals[tlId] || 0;
+
+    // Collect all cross-timeline opportunities with strategic scoring
     const opportunities: Array<{
       targetTimelineId: number;
       square: Square;
       piece: Piece;
       isCapture: boolean;
       bias: number;
+      strategicScore: number;
     }> = [];
 
     // Find pieces that can cross timelines (all except king)
@@ -3219,19 +3236,56 @@ timelines - list timelines`,
       for (let c = 0; c < 8; c++) {
         const piece = board[r][c];
         if (piece && piece.type !== 'k' && piece.color === color) {
-          const bias = portalBiases[piece.type] || 0.1;  // Default 10% for pieces without explicit bias
-          if (bias <= 0) continue;
+          const baseBias = portalBiases[piece.type] || 0.1;
+          if (baseBias <= 0) continue;
 
           const square = (String.fromCharCode(97 + c) + (8 - r)) as Square;
           const targets = this.getCrossTimelineTargets(tlId, square, piece);
 
           for (const target of targets) {
+            const targetEval = timelineEvals[target.targetTimelineId] || 0;
+
+            // Strategic scoring based on 5D chess awareness:
+            // 1. If source board is LOSING and target is WINNING: HIGH priority (send reinforcements)
+            // 2. If source board is WINNING and target is LOSING: MEDIUM priority (press advantage)
+            // 3. Captures are always valuable
+            // 4. Sending to boards where we're already winning = build overwhelming force
+
+            let strategicScore = 0;
+
+            // Capture bonus (very valuable in multi-board chess)
+            if (target.isCapture) {
+              strategicScore += 3;
+            }
+
+            // Piece value for the crossing piece
+            const pieceValues: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+            const pieceValue = pieceValues[piece.type] || 1;
+
+            // 5D tactical evaluation
+            if (sourceEval > 3 && targetEval < -1) {
+              // We're winning here, losing there - send reinforcements!
+              strategicScore += 4;
+            } else if (sourceEval < -1 && targetEval > 1) {
+              // We're losing here but winning there - escape valuable pieces
+              strategicScore += 2 + (pieceValue > 3 ? 2 : 0);
+            } else if (targetEval > 2) {
+              // Target board is favorable - build overwhelming force
+              strategicScore += 2;
+            }
+
+            // Bonus for high-value pieces crossing (queens, rooks)
+            if (pieceValue >= 5) {
+              strategicScore += 1;
+            }
+
             opportunities.push({
               targetTimelineId: target.targetTimelineId,
               square,
               piece,
               isCapture: target.isCapture,
-              bias,
+              bias: baseBias,
+              strategicScore,
             });
           }
         }
@@ -3240,17 +3294,30 @@ timelines - list timelines`,
 
     if (opportunities.length === 0) return null;
 
-    // Prefer captures, use highest-bias piece type
-    const captures = opportunities.filter(o => o.isCapture);
-    const pool = captures.length > 0 ? captures : opportunities;
+    // Sort by strategic score (highest first), then by capture, then by bias
+    opportunities.sort((a, b) => {
+      if (b.strategicScore !== a.strategicScore) return b.strategicScore - a.strategicScore;
+      if (a.isCapture !== b.isCapture) return a.isCapture ? -1 : 1;
+      return b.bias - a.bias;
+    });
 
-    // Sort by bias (highest first)
-    pool.sort((a, b) => b.bias - a.bias);
+    // 5D Aggressive mode: much higher base chance for cross-timeline moves
+    // Base 60% chance for top strategic move, decreasing for lower-scored moves
+    for (const opp of opportunities) {
+      // Strategic score boosts the chance significantly
+      const baseChance = 0.35; // Much higher than old 0.05 (0.1 * 0.5)
+      const strategicBonus = opp.strategicScore * 0.12; // Each strategic point adds 12%
+      const totalChance = Math.min(0.95, baseChance + strategicBonus);
 
-    // Pick the first opportunity that passes its bias check (lower chance than time travel)
-    for (const opp of pool) {
-      // Cross-timeline is less dramatic than time travel, use half the bias
-      if (Math.random() < opp.bias * 0.5) {
+      if (Math.random() < totalChance) {
+        console.log('[CPU 5D] Cross-timeline move!', {
+          from: tlId,
+          to: opp.targetTimelineId,
+          piece: opp.piece.type,
+          isCapture: opp.isCapture,
+          strategicScore: opp.strategicScore,
+          chance: Math.round(totalChance * 100) + '%',
+        });
         return {
           targetTimelineId: opp.targetTimelineId,
           square: opp.square,
@@ -3261,6 +3328,32 @@ timelines - list timelines`,
     }
 
     return null;
+  }
+
+  /** Evaluate material balance for a position (positive = color is winning) */
+  private _evaluateMaterialBalance(chess: ChessInstance, color: PieceColor): number {
+    const board = chess.board();
+    const pieceValues: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+    let whiteScore = 0;
+    let blackScore = 0;
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = board[r][c];
+        if (piece) {
+          const value = pieceValues[piece.type] || 0;
+          if (piece.color === 'w') {
+            whiteScore += value;
+          } else {
+            blackScore += value;
+          }
+        }
+      }
+    }
+
+    // Return score relative to the specified color
+    return color === 'w' ? whiteScore - blackScore : blackScore - whiteScore;
   }
 
   /** Update CPU UI elements */

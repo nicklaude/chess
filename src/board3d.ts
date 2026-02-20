@@ -2430,7 +2430,7 @@ class Board3DManager implements IBoard3D {
     this._boundResize = () => this._scheduleResize();
     this._boundKeyDown = (e: KeyboardEvent) => this._onKeyDown(e);
     this._boundKeyUp = (e: KeyboardEvent) => this._onKeyUp(e);
-    this._boundBeforeUnload = () => this.dispose();
+    // beforeunload handler removed - was blocking tab close by calling dispose() synchronously
 
     this.renderer.domElement.addEventListener('pointerdown', this._boundPointerDown);
     this.renderer.domElement.addEventListener('pointerup', this._boundPointerUp);
@@ -2450,8 +2450,8 @@ class Board3DManager implements IBoard3D {
     window.addEventListener('keydown', this._boundKeyDown);
     window.addEventListener('keyup', this._boundKeyUp);
 
-    // Tab close cleanup - dispose all resources to prevent lag
-    window.addEventListener('beforeunload', this._boundBeforeUnload);
+    // NOTE: Removed beforeunload handler - calling dispose() synchronously blocks tab close.
+    // Browser will free all resources automatically when tab closes anyway.
 
     // Ensure initial render happens after all setup is complete
     this._needsRender = true;
