@@ -2040,21 +2040,22 @@ export class TimelineCol implements ITimelineCol {
     });
   }
 
-  /** Set board state glow (checkmate = red, draw = grey, none = clear) */
+  /** Set board state glow (checkmate = red, draw = amber/orange, none = clear) */
   setBoardGlow(state: 'checkmate' | 'draw' | 'none'): void {
     let glowColor: Color | null = null;
     if (state === 'checkmate') {
       glowColor = new THREE.Color(0xff3333);
     } else if (state === 'draw') {
-      glowColor = new THREE.Color(0x888888);
+      glowColor = new THREE.Color(0xffa500);  // Amber/orange for draw - more noticeable than grey
     }
 
     // Apply glow to all square meshes on the main board
+    const glowIntensity = state === 'draw' ? 0.4 : 0.3;  // Slightly stronger for draw
     for (const mesh of this.squareMeshes) {
       const mat = mesh.material as MeshStandardMaterial;
       if (glowColor) {
         mat.emissive = glowColor;
-        mat.emissiveIntensity = 0.3;
+        mat.emissiveIntensity = glowIntensity;
       } else {
         mat.emissive = new THREE.Color(0);
         mat.emissiveIntensity = 0;
@@ -2186,7 +2187,13 @@ class Board3DManager implements IBoard3D {
     square?: string;
     targetTurnIndex?: number;  // For time travel: target snapshot index
     isWhite?: boolean;
+    createdAt?: number;  // Timestamp for cross-timeline lines (for fade-out animation)
   }> = [];
+
+  // Duration in seconds for cross-timeline lines to fade out completely
+  private static readonly CROSS_LINE_FADE_DURATION = 8.0;
+  // Track cross-line mesh groups for efficient opacity updates (index matches _branchLineData cross entries)
+  private _crossLineMeshes: Array<{ group: Group; dataIndex: number; baseOpacity: number }> = [];
   private onSquareClick:
     | ((info: { timelineId: number; square: string; turn: number; isHistory: boolean }) => void)
     | null = null;
@@ -2516,6 +2523,7 @@ class Board3DManager implements IBoard3D {
       toTurn: toCol.historyLayers.length,
       square,
       isWhite,
+      createdAt: this._clock?.getElapsedTime() ?? 0,
     });
 
     this._rebuildBranchLines();
@@ -2562,6 +2570,9 @@ class Board3DManager implements IBoard3D {
     while (this.branchLineGroup.children.length) {
       this.branchLineGroup.remove(this.branchLineGroup.children[0]);
     }
+
+    // Clear cross-line mesh tracking
+    this._crossLineMeshes = [];
 
     // Rebuild each line from metadata
     for (const data of this._branchLineData) {
@@ -2615,8 +2626,26 @@ class Board3DManager implements IBoard3D {
 
         const color = 0xaa44ff;  // Purple
         const avgDepth = (depthSinceCrossFrom + depthSinceCrossTo) / 2;
-        const opacityScale = Math.max(0.2, 1 - avgDepth * 0.08);
-        this.branchLineGroup.add(Board3DManager._glowTube(from, to, color, 0.03, 0.12, true, opacityScale));
+        const depthOpacity = Math.max(0.2, 1 - avgDepth * 0.08);
+
+        // Calculate time-based fade for cross-timeline lines
+        const currentTime = this._clock?.getElapsedTime() ?? 0;
+        const elapsed = currentTime - (data.createdAt ?? currentTime);
+        const timeFade = Math.max(0, 1 - elapsed / Board3DManager.CROSS_LINE_FADE_DURATION);
+        const opacityScale = depthOpacity * timeFade;
+
+        // Skip drawing if fully faded
+        if (opacityScale <= 0) continue;
+
+        const tubeGroup = Board3DManager._glowTube(from, to, color, 0.03, 0.12, true, opacityScale);
+        this.branchLineGroup.add(tubeGroup);
+
+        // Track this cross-line mesh for efficient opacity updates in animation loop
+        this._crossLineMeshes.push({
+          group: tubeGroup,
+          dataIndex: this._branchLineData.indexOf(data),
+          baseOpacity: depthOpacity,
+        });
 
       } else if (data.type === 'timetravel' && data.square !== undefined && data.targetTurnIndex !== undefined) {
         // Time travel: vertical line down then horizontal to new timeline
@@ -2671,6 +2700,29 @@ class Board3DManager implements IBoard3D {
     // Rebuild branch lines whenever any timeline gets a new snapshot
     // This ensures lines stay connected to the correct history layers
     this._rebuildBranchLines();
+  }
+
+  /** Remove fully faded cross-timeline lines from data and scene */
+  private _cleanupFadedCrossLines(currentTime: number): void {
+    // Find indices of cross lines that have fully faded
+    const indicesToRemove: number[] = [];
+    for (let i = this._branchLineData.length - 1; i >= 0; i--) {
+      const data = this._branchLineData[i];
+      if (data.type === 'cross' && data.createdAt !== undefined) {
+        const elapsed = currentTime - data.createdAt;
+        if (elapsed >= Board3DManager.CROSS_LINE_FADE_DURATION) {
+          indicesToRemove.push(i);
+        }
+      }
+    }
+
+    // Remove faded lines and rebuild if any were removed
+    if (indicesToRemove.length > 0) {
+      for (const idx of indicesToRemove) {
+        this._branchLineData.splice(idx, 1);
+      }
+      this._rebuildBranchLines();
+    }
   }
 
   setActiveTimeline(id: number): void {
@@ -3225,6 +3277,49 @@ class Board3DManager implements IBoard3D {
       this._needsRender = true;
     }
 
+    // Cross-timeline line fade-out animation
+    if (this._crossLineMeshes.length > 0) {
+      let needsCleanup = false;
+
+      for (const entry of this._crossLineMeshes) {
+        const data = this._branchLineData[entry.dataIndex];
+        if (!data || data.type !== 'cross') continue;
+
+        const elapsed = t - (data.createdAt ?? t);
+        const timeFade = Math.max(0, 1 - elapsed / Board3DManager.CROSS_LINE_FADE_DURATION);
+        const targetOpacity = entry.baseOpacity * timeFade;
+
+        if (targetOpacity <= 0) {
+          needsCleanup = true;
+        }
+
+        // Update opacity on all meshes in the glow tube group
+        entry.group.traverse((child: Object3D) => {
+          const mesh = child as Mesh;
+          if (mesh.isMesh && mesh.material) {
+            const mat = mesh.material as MeshBasicMaterial;
+            // Scale relative to the original opacity ratios in _glowTube
+            // Outer glow: 0.1, Mid glow: 0.22, Core: 0.75, Sphere: 0.6
+            if (mat.opacity !== undefined) {
+              // Determine which layer this is based on original opacity range
+              const origBase = mat.userData?.origOpacity ?? mat.opacity;
+              if (!mat.userData?.origOpacity) {
+                mat.userData = mat.userData || {};
+                mat.userData.origOpacity = mat.opacity / entry.baseOpacity;
+              }
+              mat.opacity = mat.userData.origOpacity * targetOpacity;
+            }
+          }
+        });
+      }
+      this._needsRender = true;
+
+      // Clean up fully faded cross-timeline lines
+      if (needsCleanup) {
+        this._cleanupFadedCrossLines(t);
+      }
+    }
+
     // PERFORMANCE: Only render when dirty flag is set
     // This can save significant GPU/CPU when the scene is static
     if (this._needsRender) {
@@ -3358,8 +3453,9 @@ class Board3DManager implements IBoard3D {
         this.branchLineGroup.remove(this.branchLineGroup.children[0]);
       }
     }
-    // Clear branch line metadata
+    // Clear branch line metadata and cross-line mesh tracking
     this._branchLineData = [];
+    this._crossLineMeshes = [];
     this.controls?.target.set(0, 0, 0);
     // Clear object pools when resetting game
     meshPool.clear();

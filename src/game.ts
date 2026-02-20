@@ -2699,7 +2699,7 @@ timelines - list timelines`,
   private cpuEnabled = false;
   private cpuTimer: number | null = null;
   private cpuMoveDelay = 400;  // ms between moves (faster for visual effect)
-  private maxTimelines = 10;   // Default to 10 branches, adjustable via slider (max 100)
+  private maxTimelines = 5;   // Default to 5 branches, adjustable via slider (max 100)
   private cpuCameraFollow = true;  // Auto-follow moves with camera
   private cpuGlobalTurn: PieceColor = 'w';  // Track whose turn globally (independent of per-timeline state)
 
