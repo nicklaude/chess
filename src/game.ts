@@ -3072,15 +3072,15 @@ timelines - list timelines`,
       const chess = tl.chess;
 
       // Priority 1: We can give check (high priority)
-      const moves = chess.moves({ verbose: true });
-      const checkMoves = moves.filter((m: ChessMove) => m.san?.includes('+'));
+      const moves = chess.moves({ verbose: true }) as ChessMove[];
+      const checkMoves = moves.filter((m) => m.san?.includes('+'));
       if (checkMoves.length > 0) score += 50;
 
       // Priority 2: We're in check (need to respond)
       if (chess.in_check()) score += 40;
 
       // Priority 3: Capture opportunities
-      const captureMoves = moves.filter((m: ChessMove) => m.captured);
+      const captureMoves = moves.filter((m) => m.captured);
       score += captureMoves.length * 5;
 
       // Priority 4: Material evaluation (press advantage or defend weakness)
