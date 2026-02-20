@@ -120,6 +120,14 @@ class GameManager {
           e.preventDefault();
           this.navigateMove(1);
           break;
+        case 'ArrowUp':
+          e.preventDefault();
+          Board3D.cycleBoard(-1);  // Previous board
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          Board3D.cycleBoard(1);   // Next board
+          break;
         case 'Tab':
           e.preventDefault();
           this.cycleTimeline(e.shiftKey ? -1 : 1);
@@ -145,6 +153,41 @@ class GameManager {
         case 'C':
           e.preventDefault();
           this.resetCameraView();
+          break;
+        // Number keys 1-9 to select specific board
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          e.preventDefault();
+          Board3D.selectBoard(parseInt(e.key) - 1);
+          break;
+        case '0':
+          e.preventDefault();
+          Board3D.selectBoard(9);  // 0 selects 10th board
+          break;
+        // Z key to zoom in on selected board
+        case 'z':
+        case 'Z':
+          e.preventDefault();
+          Board3D.zoomInOnSelected();
+          break;
+        // X key to zoom out / show all
+        case 'x':
+        case 'X':
+          e.preventDefault();
+          Board3D.zoomOut();
+          break;
+        // V key to toggle zoom
+        case 'v':
+        case 'V':
+          e.preventDefault();
+          Board3D.toggleZoom();
           break;
       }
     });
