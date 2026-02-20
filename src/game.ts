@@ -120,6 +120,14 @@ class GameManager {
           e.preventDefault();
           this.navigateMove(1);
           break;
+        case 'ArrowUp':
+          e.preventDefault();
+          Board3D.cycleBoard(-1);  // Previous board
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          Board3D.cycleBoard(1);   // Next board
+          break;
         case 'Tab':
           e.preventDefault();
           this.cycleTimeline(e.shiftKey ? -1 : 1);
@@ -145,6 +153,41 @@ class GameManager {
         case 'C':
           e.preventDefault();
           this.resetCameraView();
+          break;
+        // Number keys 1-9 to select specific board
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          e.preventDefault();
+          Board3D.selectBoard(parseInt(e.key) - 1);
+          break;
+        case '0':
+          e.preventDefault();
+          Board3D.selectBoard(9);  // 0 selects 10th board
+          break;
+        // Z key to zoom in on selected board
+        case 'z':
+        case 'Z':
+          e.preventDefault();
+          Board3D.zoomInOnSelected();
+          break;
+        // X key to zoom out / show all
+        case 'x':
+        case 'X':
+          e.preventDefault();
+          Board3D.zoomOut();
+          break;
+        // V key to toggle zoom
+        case 'v':
+        case 'V':
+          e.preventDefault();
+          Board3D.toggleZoom();
           break;
       }
     });
@@ -957,7 +1000,53 @@ timelines - list timelines`,
     const siblingCount = Object.values(this.timelines)
       .filter(tl => tl.parentId === parentTlId).length;
     const side = siblingCount % 2 === 0 ? 1 : -1;
-    const xOffset = parentTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil((siblingCount + 1) / 2);
+    let xOffset = parentTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil((siblingCount + 1) / 2);
+
+    // OVERLAP DETECTION: Check if any existing timeline has this xOffset
+    const existingOffsets = Object.values(this.timelines).map(tl => tl.xOffset);
+    if (existingOffsets.includes(xOffset)) {
+      console.error('[BOARD_OVERLAP_BUG] Timeline xOffset collision detected!', {
+        newTimelineId: newId,
+        calculatedXOffset: xOffset,
+        parentId: parentTlId,
+        siblingCount,
+        side,
+        existingOffsets,
+        allTimelines: Object.values(this.timelines).map(tl => ({
+          id: tl.id,
+          xOffset: tl.xOffset,
+          parentId: tl.parentId,
+        })),
+      });
+      // FIX: Find a unique position by incrementing until we find an unused slot
+      const spacing = Board3D.TIMELINE_SPACING;
+      let attempts = 0;
+      while (existingOffsets.includes(xOffset) && attempts < 100) {
+        // Try alternating left/right with increasing distance
+        attempts++;
+        const distance = Math.ceil(attempts / 2) * spacing;
+        xOffset = parentTl.xOffset + (attempts % 2 === 0 ? 1 : -1) * distance;
+      }
+      console.log('[BOARD_OVERLAP_FIX] Found unique xOffset after collision:', {
+        newTimelineId: newId,
+        finalXOffset: xOffset,
+        attempts,
+      });
+    }
+
+    // DEBUG: Log all timeline positions for visibility
+    console.log('[TIMELINE_POSITIONS] Creating timeline with position:', {
+      newTimelineId: newId,
+      xOffset,
+      parentId: parentTlId,
+      siblingCount,
+      side,
+      allPositions: Object.values(this.timelines).map(tl => ({
+        id: tl.id,
+        xOffset: tl.xOffset,
+        name: tl.name,
+      })),
+    });
 
     const newTl = this._createTimeline(newId, xOffset, parentTlId, snapshotIdx, fen);
 
@@ -1626,7 +1715,53 @@ timelines - list timelines`,
     const siblingCount = Object.values(this.timelines)
       .filter(tl => tl.parentId === sourceTimelineId).length;
     const side = siblingCount % 2 === 0 ? 1 : -1;
-    const xOffset = sourceTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil((siblingCount + 1) / 2);
+    let xOffset = sourceTl.xOffset + side * Board3D.TIMELINE_SPACING * Math.ceil((siblingCount + 1) / 2);
+
+    // OVERLAP DETECTION: Check if any existing timeline has this xOffset
+    const existingOffsets = Object.values(this.timelines).map(tl => tl.xOffset);
+    if (existingOffsets.includes(xOffset)) {
+      console.error('[BOARD_OVERLAP_BUG] Timeline xOffset collision detected (time travel)!', {
+        newTimelineId: newId,
+        calculatedXOffset: xOffset,
+        parentId: sourceTimelineId,
+        siblingCount,
+        side,
+        existingOffsets,
+        allTimelines: Object.values(this.timelines).map(tl => ({
+          id: tl.id,
+          xOffset: tl.xOffset,
+          parentId: tl.parentId,
+        })),
+      });
+      // FIX: Find a unique position by incrementing until we find an unused slot
+      const spacing = Board3D.TIMELINE_SPACING;
+      let attempts = 0;
+      while (existingOffsets.includes(xOffset) && attempts < 100) {
+        // Try alternating left/right with increasing distance
+        attempts++;
+        const distance = Math.ceil(attempts / 2) * spacing;
+        xOffset = sourceTl.xOffset + (attempts % 2 === 0 ? 1 : -1) * distance;
+      }
+      console.log('[BOARD_OVERLAP_FIX] Found unique xOffset after collision (time travel):', {
+        newTimelineId: newId,
+        finalXOffset: xOffset,
+        attempts,
+      });
+    }
+
+    // DEBUG: Log all timeline positions for visibility
+    console.log('[TIMELINE_POSITIONS] Creating timeline with position (time travel):', {
+      newTimelineId: newId,
+      xOffset,
+      parentId: sourceTimelineId,
+      siblingCount,
+      side,
+      allPositions: Object.values(this.timelines).map(tl => ({
+        id: tl.id,
+        xOffset: tl.xOffset,
+        name: tl.name,
+      })),
+    });
 
     console.log('[Time Travel] Creating new timeline:', {
       originalFen: fen,

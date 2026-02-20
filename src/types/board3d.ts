@@ -153,4 +153,13 @@ export interface IBoard3D {
   spawnPortalEffect(timelineId: number, square: string): void;
   spawnCaptureEffect(timelineId: number, square: string): void;
   clearAll(): void;
+
+  // Board navigation methods
+  selectBoard(index: number): void;
+  cycleBoard(direction: 1 | -1): void;
+  zoomInOnSelected(): void;
+  zoomOut(): void;
+  toggleZoom(): void;
+  getTimelineCount(): number;
+  getSelectedBoardIndex(): number | null;
 }

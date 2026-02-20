@@ -47,6 +47,21 @@ declare const THREE: typeof import('three') & {
 // Set to true to enable detailed render logging
 const DEBUG_MODE = true;
 
+// Session-wide ghost removal counter
+// Tracks MANDATORY_SYNC removals across all Board3D instances
+let sessionGhostRemovalCount = 0;
+
+// Update the ghost counter display in the UI
+function updateGhostCounterDisplay(): void {
+  const ghostCounterEl = document.getElementById('ghost-counter');
+  if (ghostCounterEl) {
+    ghostCounterEl.textContent = sessionGhostRemovalCount > 0 ? `G:${sessionGhostRemovalCount}` : '0';
+    if (sessionGhostRemovalCount > 0) {
+      ghostCounterEl.classList.add('active');
+    }
+  }
+}
+
 // ===============================================================
 // SharedResources - singleton for shared geometries and materials
 // Performance optimization: create once, reuse everywhere
@@ -321,6 +336,7 @@ const meshPool = new MeshPool();
 
 interface PooledSprite extends Sprite {
   _pooled?: boolean;
+  _spriteId?: number;  // Unique ID for tracking sprite lifecycle
 }
 
 class SpritePool {
@@ -328,6 +344,7 @@ class SpritePool {
   private maxPoolSize = 128;  // Enough for 4 boards worth of pieces
   private static readonly WARNING_THRESHOLD = 64;  // Log when pool exceeds this
   private _totalCreated = 0;  // Track total sprites ever created for monitoring
+  private _nextSpriteId = 1;  // Monotonically increasing ID for tracking
 
   /** Get a sprite from the pool or create a new one */
   acquire(material: SpriteMaterial): PooledSprite {
@@ -339,12 +356,21 @@ class SpritePool {
         (sprite.material as SpriteMaterial).dispose();
       }
       sprite.material = material;
+
+      if (DEBUG_MODE) {
+        console.log(`[SpritePool] ACQUIRE reused sprite id=${sprite._spriteId}`);
+      }
       return sprite;
     }
     const sprite = new THREE.Sprite(material) as PooledSprite;
     sprite._pooled = true;
     sprite.frustumCulled = true;
+    sprite._spriteId = this._nextSpriteId++;
     this._totalCreated++;
+
+    if (DEBUG_MODE) {
+      console.log(`[SpritePool] ACQUIRE new sprite id=${sprite._spriteId} (total created: ${this._totalCreated})`);
+    }
 
     // Monitor: warn if we've created many sprites (potential memory leak indicator)
     if (this._totalCreated > 0 && this._totalCreated % 100 === 0) {
@@ -356,6 +382,9 @@ class SpritePool {
 
   /** Return a sprite to the pool */
   release(sprite: PooledSprite): void {
+    const spriteId = sprite._spriteId ?? 'unknown';
+    const hadParent = !!sprite.parent;
+
     // v0.1.77 FIX: Always remove from parent first, even for non-pooled sprites
     // This ensures ghost sprites are removed from scene regardless of pool status
     if (sprite.parent) {
@@ -363,10 +392,15 @@ class SpritePool {
     }
     sprite.visible = false;
 
+    if (DEBUG_MODE) {
+      console.log(`[SpritePool] RELEASE sprite id=${spriteId} hadParent=${hadParent} pos=(${sprite.position.x.toFixed(2)},${sprite.position.y.toFixed(2)},${sprite.position.z.toFixed(2)})`);
+    }
+
     // Non-pooled sprites: log warning and dispose (they won't be reused)
     if (!sprite._pooled) {
       console.warn('[SpritePool] NON_POOLED_SPRITE: Removing sprite that was not created via pool. This may indicate a bug in sprite creation.', {
-        hasParent: !!sprite.parent,
+        spriteId,
+        hasParent: hadParent,
         position: sprite.position ? { x: sprite.position.x, y: sprite.position.y, z: sprite.position.z } : null,
       });
       // Dispose the material since we can't reuse this sprite
@@ -514,7 +548,11 @@ export class TimelineCol implements ITimelineCol {
     this.group.add(this.interLayerGroup);
 
     this._buildBoard();
+    this._addDebugPositionLabel();
     scene.add(this.group);
+
+    // Log timeline creation with position
+    console.log(`[Board3D] Timeline ${id} created at xOffset=${xOffset}`);
   }
 
   private _toSq(r: number, c: number): string {
@@ -623,6 +661,37 @@ export class TimelineCol implements ITimelineCol {
     }
   }
 
+  /** Add debug label showing timeline ID and xOffset above the board */
+  private _addDebugPositionLabel(): void {
+    // Create a larger canvas for the position indicator
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+
+    // Draw background with slight transparency
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.roundRect(4, 4, 248, 56, 8);
+    ctx.fill();
+
+    // Draw text
+    ctx.font = 'bold 24px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#00ffff';  // Cyan color for visibility
+    ctx.fillText(`TL:${this.id} X:${this.xOffset}`, 128, 32);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(material);
+
+    // Position above the board (z = -5 puts it behind/above the board in view)
+    sprite.position.set(0, 0.1, -5.5);
+    sprite.scale.set(2.5, 0.625, 1);  // Wider than tall to match canvas aspect ratio
+
+    this.group.add(sprite);
+  }
+
   /* render pieces on current board - OPTIMIZED with diff-based updates and sprite pooling */
   render(position: Board): void {
     const timestamp = Date.now();
@@ -710,10 +779,28 @@ export class TimelineCol implements ITimelineCol {
         const posKey = `${row},${col}`;
 
         if (!validPositionKeys.has(posKey)) {
-          // Ghost found! Remove directly from scene graph
-          console.warn(`[Board3D.render] MANDATORY_SYNC: Ghost sprite at ${posKey} not in valid positions, removing directly tl=${this.id}`);
-          this.group.remove(child);  // Direct removal - don't rely on spritePool.release()
-          spritePool.release(child as PooledSprite);  // Still return to pool for reuse
+          // Ghost found! Force removal from scene graph
+          const spriteId = (child as PooledSprite)._spriteId ?? 'unknown';
+          console.warn(`[Board3D.render] MANDATORY_SYNC: Ghost sprite id=${spriteId} at ${posKey} not in valid positions, FORCE removing tl=${this.id}`);
+
+          // FORCE REMOVAL: Try multiple removal approaches to ensure it's gone
+          // 1. Direct removal from this.group
+          this.group.remove(child);
+
+          // 2. If it still has a parent (shouldn't happen but be safe), remove from parent
+          if (child.parent) {
+            console.error(`[Board3D.render] MANDATORY_SYNC: Sprite id=${spriteId} still has parent after group.remove()! Force removing from parent.`);
+            child.parent.remove(child);
+          }
+
+          // 3. Make it invisible as a fallback
+          child.visible = false;
+
+          // 4. Move it far off screen as nuclear option
+          child.position.set(10000, 10000, 10000);
+
+          // Return to pool (this will also try parent.remove())
+          spritePool.release(child as PooledSprite);
 
           // Clean up tracking structures
           if (this._spriteMap.has(posKey)) {
@@ -725,12 +812,14 @@ export class TimelineCol implements ITimelineCol {
           }
 
           mandatorySyncRemoved++;
-          mandatorySyncRemovedPositions.push(posKey);
+          mandatorySyncRemovedPositions.push(`${posKey}(id=${spriteId})`);
         }
       }
     }
     if (mandatorySyncRemoved > 0) {
       console.error(`[Board3D.render] MANDATORY_SYNC_REMOVED: ${mandatorySyncRemoved} ghost sprites at positions=[${mandatorySyncRemovedPositions.join(',')}] tl=${this.id}`);
+      sessionGhostRemovalCount += mandatorySyncRemoved;
+      updateGhostCounterDisplay();
     }
 
     // Find what changed: removed, added, and unchanged positions
@@ -864,6 +953,45 @@ export class TimelineCol implements ITimelineCol {
       this.group.add(sprite);
       this.pieceMeshes.push(sprite);
       this._spriteMap.set(posKey, sprite);
+
+      if (DEBUG_MODE) {
+        console.log(`[Board3D.render] ADDED sprite id=${(sprite as PooledSprite)._spriteId} at ${posKey} tl=${this.id}`);
+
+        // IMMEDIATE VERIFICATION: Check that we don't have duplicates at this position RIGHT NOW
+        let spritesAtThisPos = 0;
+        for (const child of this.group.children) {
+          if (this._isMainBoardSprite(child as Object3D)) {
+            const childCol = Math.round((child as Object3D).position.x + 3.5);
+            const childRow = Math.round((child as Object3D).position.z + 3.5);
+            if (childRow === r && childCol === c) {
+              spritesAtThisPos++;
+            }
+          }
+        }
+        if (spritesAtThisPos > 1) {
+          console.error(`[Board3D.render] POST_ADD_DUPLICATE: ${spritesAtThisPos} sprites at ${posKey} immediately after adding! Removing extras.`);
+          // Remove all but one
+          let kept = false;
+          for (let ci = this.group.children.length - 1; ci >= 0; ci--) {
+            const child = this.group.children[ci];
+            if (this._isMainBoardSprite(child as Object3D)) {
+              const childCol = Math.round((child as Object3D).position.x + 3.5);
+              const childRow = Math.round((child as Object3D).position.z + 3.5);
+              if (childRow === r && childCol === c) {
+                if (kept) {
+                  // Remove this duplicate
+                  this.group.remove(child);
+                  spritePool.release(child as PooledSprite);
+                  const idx = this.pieceMeshes.indexOf(child as Sprite);
+                  if (idx !== -1) this.pieceMeshes.splice(idx, 1);
+                } else {
+                  kept = true;  // Keep the first one we find (the most recently added)
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     // Update stored state for next render
@@ -2085,6 +2213,19 @@ class Board3DManager implements IBoard3D {
   // WebGL context loss state
   private _webglContextLost = false;
 
+  // Animation frame ID for proper cleanup on dispose
+  private _animationFrameId: number | null = null;
+
+  // Flag to stop animation loop on dispose
+  private _disposed = false;
+
+  // Selected board index for keyboard navigation (null = no specific board selected)
+  private _selectedBoardIndex: number | null = null;
+
+  // Zoom state for board focus
+  private _zoomedIn = false;
+  private _preZoomCameraState: { position: Vector3; target: Vector3 } | null = null;
+
   // Visual effects storage
   private _activeEffects: Array<{
     mesh: Mesh | Points;
@@ -2254,7 +2395,7 @@ class Board3DManager implements IBoard3D {
     controls.panSpeed = 0.8;
     controls.zoomSpeed = 1.2;
     controls.minDistance = 5;
-    controls.maxDistance = 80;
+    controls.maxDistance = 200;  // Increased from 80 to support viewing all 10 boards
     controls.maxPolarAngle = Math.PI * 0.85;
     controls.target.set(0, 0, 0);
     controls.screenSpacePanning = true;
@@ -2803,6 +2944,37 @@ class Board3DManager implements IBoard3D {
       e.preventDefault();
       this._panKeys[key] = true;
     }
+
+    // Debug key: 'p' to log all timeline positions
+    if (e.key.toLowerCase() === 'p' && e.shiftKey) {
+      this._debugLogAllTimelinePositions();
+    }
+  }
+
+  /** Debug helper: Log all timeline positions to console */
+  private _debugLogAllTimelinePositions(): void {
+    const positions = Object.values(this.timelineCols).map(col => ({
+      id: col.id,
+      xOffset: col.xOffset,
+      groupX: col.group.position.x,
+    }));
+
+    // Sort by xOffset for clarity
+    positions.sort((a, b) => a.xOffset - b.xOffset);
+
+    console.log('=== TIMELINE POSITIONS DEBUG ===');
+    console.table(positions);
+
+    // Check for duplicates
+    const offsets = positions.map(p => p.xOffset);
+    const duplicates = offsets.filter((v, i) => offsets.indexOf(v) !== i);
+    if (duplicates.length > 0) {
+      console.error('[DUPLICATE_POSITIONS] Found timelines at same xOffset!', duplicates);
+    } else {
+      console.log('[POSITIONS_OK] All timelines have unique xOffset values');
+    }
+
+    console.log('================================');
   }
 
   private _onKeyUp(e: KeyboardEvent): void {
@@ -2964,7 +3136,10 @@ class Board3DManager implements IBoard3D {
   }
 
   private _animate(): void {
-    requestAnimationFrame(() => this._animate());
+    // Check if disposed - stop animation loop
+    if (this._disposed) return;
+
+    this._animationFrameId = requestAnimationFrame(() => this._animate());
 
     // Skip rendering if WebGL context is lost
     if (this._webglContextLost) return;
@@ -3198,6 +3373,17 @@ class Board3DManager implements IBoard3D {
    * Call this on beforeunload event or when destroying the game instance.
    */
   dispose(): void {
+    console.log('[Board3D] dispose() called - cleaning up resources');
+
+    // Set disposed flag to stop animation loop
+    this._disposed = true;
+
+    // Cancel any pending animation frame
+    if (this._animationFrameId !== null) {
+      cancelAnimationFrame(this._animationFrameId);
+      this._animationFrameId = null;
+    }
+
     // Clear all timelines first
     this.clearAll();
 
@@ -3326,6 +3512,9 @@ class Board3DManager implements IBoard3D {
       this.renderer = null;
     }
 
+    // Clear sprite pool entirely on dispose
+    spritePool.clear();
+
     // Clear references
     this.scene = null;
     this.camera = null;
@@ -3335,6 +3524,165 @@ class Board3DManager implements IBoard3D {
     this.container = null;
     this._clock = null;
     this.onSquareClick = null;
+
+    console.log('[Board3D] dispose() complete');
+  }
+
+  /**
+   * Select a specific board by index (0-9) for keyboard navigation.
+   * @param index - Board index (0 = first timeline, 1 = second, etc.)
+   */
+  selectBoard(index: number): void {
+    const timelineIds = Object.keys(this.timelineCols).map(k => parseInt(k)).sort((a, b) => {
+      const aX = this.timelineCols[a]?.xOffset ?? 0;
+      const bX = this.timelineCols[b]?.xOffset ?? 0;
+      return aX - bX;  // Sort by X position (left to right)
+    });
+
+    if (index < 0 || index >= timelineIds.length) {
+      console.log(`[Board3D] selectBoard: index ${index} out of range (0-${timelineIds.length - 1})`);
+      return;
+    }
+
+    this._selectedBoardIndex = index;
+    const timelineId = timelineIds[index];
+
+    // Highlight the selected board visually
+    this.setActiveTimeline(timelineId);
+
+    // Pan camera to selected board
+    this.focusTimeline(timelineId, true);
+
+    console.log(`[Board3D] selectBoard: selected board ${index} (timeline ${timelineId})`);
+    this._needsRender = true;
+  }
+
+  /**
+   * Cycle to the next/previous board.
+   * @param direction - 1 for next, -1 for previous
+   */
+  cycleBoard(direction: 1 | -1): void {
+    const timelineIds = Object.keys(this.timelineCols).map(k => parseInt(k)).sort((a, b) => {
+      const aX = this.timelineCols[a]?.xOffset ?? 0;
+      const bX = this.timelineCols[b]?.xOffset ?? 0;
+      return aX - bX;
+    });
+
+    if (timelineIds.length === 0) return;
+
+    let newIndex: number;
+    if (this._selectedBoardIndex === null) {
+      newIndex = direction === 1 ? 0 : timelineIds.length - 1;
+    } else {
+      newIndex = this._selectedBoardIndex + direction;
+      // Wrap around
+      if (newIndex < 0) newIndex = timelineIds.length - 1;
+      if (newIndex >= timelineIds.length) newIndex = 0;
+    }
+
+    this.selectBoard(newIndex);
+  }
+
+  /**
+   * Zoom in on the currently selected board.
+   */
+  zoomInOnSelected(): void {
+    if (this._selectedBoardIndex === null) {
+      console.log('[Board3D] zoomInOnSelected: no board selected');
+      return;
+    }
+
+    const timelineIds = Object.keys(this.timelineCols).map(k => parseInt(k)).sort((a, b) => {
+      const aX = this.timelineCols[a]?.xOffset ?? 0;
+      const bX = this.timelineCols[b]?.xOffset ?? 0;
+      return aX - bX;
+    });
+
+    if (this._selectedBoardIndex >= timelineIds.length) return;
+
+    const timelineId = timelineIds[this._selectedBoardIndex];
+    const col = this.timelineCols[timelineId];
+    if (!col || !this.camera || !this.controls) return;
+
+    // Save current camera state for zoom out
+    if (!this._zoomedIn) {
+      this._preZoomCameraState = {
+        position: this.camera.position.clone(),
+        target: this.controls.target.clone(),
+      };
+    }
+
+    // Zoom in close to the board
+    const targetX = col.xOffset;
+    this.controls.target.set(targetX, 0, 0);
+    this.camera.position.set(targetX, 8, 8);  // Close-up view
+
+    this._zoomedIn = true;
+    this._needsRender = true;
+    console.log(`[Board3D] zoomInOnSelected: zoomed in on board ${this._selectedBoardIndex}`);
+  }
+
+  /**
+   * Zoom out to show all boards (or restore previous camera position).
+   */
+  zoomOut(): void {
+    if (!this.camera || !this.controls) return;
+
+    if (this._preZoomCameraState) {
+      // Restore previous camera state
+      this.camera.position.copy(this._preZoomCameraState.position);
+      this.controls.target.copy(this._preZoomCameraState.target);
+      this._preZoomCameraState = null;
+    } else {
+      // Default: zoom out to see all boards
+      const timelineIds = Object.keys(this.timelineCols).map(k => parseInt(k));
+      if (timelineIds.length === 0) return;
+
+      // Calculate center and extent of all boards
+      let minX = Infinity, maxX = -Infinity;
+      for (const id of timelineIds) {
+        const x = this.timelineCols[id]?.xOffset ?? 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+
+      const centerX = (minX + maxX) / 2;
+      const extent = maxX - minX;
+      // Position camera to see all boards with some padding
+      const distance = Math.max(30, extent * 0.8 + 15);
+
+      this.controls.target.set(centerX, 0, 0);
+      this.camera.position.set(centerX, distance * 0.8, distance * 0.6);
+    }
+
+    this._zoomedIn = false;
+    this._needsRender = true;
+    console.log('[Board3D] zoomOut: showing all boards');
+  }
+
+  /**
+   * Toggle zoom: if zoomed in, zoom out; if zoomed out, zoom in on selected.
+   */
+  toggleZoom(): void {
+    if (this._zoomedIn) {
+      this.zoomOut();
+    } else {
+      this.zoomInOnSelected();
+    }
+  }
+
+  /**
+   * Get the number of visible timelines.
+   */
+  getTimelineCount(): number {
+    return Object.keys(this.timelineCols).length;
+  }
+
+  /**
+   * Get the currently selected board index.
+   */
+  getSelectedBoardIndex(): number | null {
+    return this._selectedBoardIndex;
   }
 }
 
