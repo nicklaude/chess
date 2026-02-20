@@ -1,6 +1,6 @@
 {
   "name": "chess",
-  "version": "0.2.81",
+  "version": "0.2.82",
   "description": "6D Chess - multiverse chess with timeline branching",
   "main": "dist/bundle.js",
   "scripts": {
