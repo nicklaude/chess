@@ -39,6 +39,7 @@ import type {
   Square,
 } from './types';
 import { TimelineTransaction } from './transaction';
+import { stockfish, type StockfishMove } from './stockfish';
 
 class GameManager {
   private timelines: Record<number, TimelineData> = {};
@@ -324,6 +325,36 @@ class GameManager {
         if (this.cpuEnabled && this.cpuCameraFollow) {
           this.cpuCameraFollow = false;
           this._updateCpuUI();
+        }
+      });
+    }
+
+    // Stockfish controls
+    const sfToggle = document.getElementById('cpu-stockfish-toggle');
+    if (sfToggle) {
+      sfToggle.addEventListener('click', () => this.toggleStockfish());
+    }
+
+    const sfSkillSlider = document.getElementById('cpu-stockfish-skill') as HTMLInputElement | null;
+    const sfSkillValue = document.getElementById('cpu-stockfish-skill-value');
+    if (sfSkillSlider) {
+      sfSkillSlider.addEventListener('input', () => {
+        const val = parseInt(sfSkillSlider.value);
+        this.setStockfishSkill(val);
+        if (sfSkillValue) {
+          sfSkillValue.textContent = val.toString();
+        }
+      });
+    }
+
+    const sfDepthSlider = document.getElementById('cpu-stockfish-depth') as HTMLInputElement | null;
+    const sfDepthValue = document.getElementById('cpu-stockfish-depth-value');
+    if (sfDepthSlider) {
+      sfDepthSlider.addEventListener('input', () => {
+        const val = parseInt(sfDepthSlider.value);
+        this.setStockfishDepth(val);
+        if (sfDepthValue) {
+          sfDepthValue.textContent = val.toString();
         }
       });
     }
@@ -2716,6 +2747,11 @@ timelines - list timelines`,
   private cpuWhitePortalBias: Record<string, number> = { q: 0.3, r: 0.2, b: 0.15, n: 0.1 };
   private cpuBlackPortalBias: Record<string, number> = { q: 0.3, r: 0.2, b: 0.15, n: 0.1 };
 
+  // Stockfish settings
+  private cpuUseStockfish = true;  // Use Stockfish when available
+  private cpuStockfishSkill = 10;  // Skill level 0-20
+  private cpuStockfishDepth = 10;  // Search depth 1-20
+
   /** Start CPU auto-play mode */
   cpuStart(): void {
     if (this.cpuEnabled) return;
@@ -2992,8 +3028,60 @@ timelines - list timelines`,
       return true;
     }
 
-    // Otherwise, pick a random legal move (with preference for captures based on setting)
-    const captures = moves.filter(m => m.captured);
+    // Use Stockfish for move selection if available, otherwise fall back to random
+    this._selectCpuMove(tlId, tl.chess.fen(), moves, capturePreference, isWhite).then((move) => {
+      if (!move) {
+        console.warn('[CPU] No move selected, skipping');
+        return;
+      }
+
+      // Show preview before executing
+      const col = Board3D.getTimeline(tlId);
+      if (col) {
+        col.showCpuMovePreview(move.from, move.to, isWhite, false);
+      }
+
+      // Store pending move and execute after tiny pause (200ms for normal moves)
+      this.cpuPendingMove = { tlId, move, isTimeTravel: false, isCrossTimeline: false };
+
+      window.setTimeout(() => this._cpuExecutePendingMove(), 200);
+    });
+
+    return true;
+  }
+
+  /** Select a CPU move using Stockfish or random fallback */
+  private async _selectCpuMove(
+    tlId: number,
+    fen: string,
+    moves: ChessMove[],
+    capturePreference: number,
+    _isWhite: boolean
+  ): Promise<ChessMove | null> {
+    // Try Stockfish first if enabled
+    if (this.cpuUseStockfish && stockfish.available) {
+      try {
+        const sfMove = await stockfish.getBestMove(fen, this.cpuStockfishDepth);
+        if (sfMove) {
+          // Find matching move in legal moves list
+          const matchingMove = moves.find(
+            (m) => m.from === sfMove.from && m.to === sfMove.to
+          );
+          if (matchingMove) {
+            // If Stockfish suggests a promotion, use it
+            if (sfMove.promotion) {
+              matchingMove.promotion = sfMove.promotion as 'n' | 'b' | 'r' | 'q';
+            }
+            return matchingMove;
+          }
+        }
+      } catch (error) {
+        console.warn('[CPU] Stockfish error, falling back to random:', error);
+      }
+    }
+
+    // Fallback: pick a random legal move (with preference for captures)
+    const captures = moves.filter((m) => m.captured);
     let move: ChessMove;
 
     if (captures.length > 0 && Math.random() < capturePreference) {
@@ -3002,17 +3090,7 @@ timelines - list timelines`,
       move = moves[Math.floor(Math.random() * moves.length)];
     }
 
-    // Show preview before executing
-    const col = Board3D.getTimeline(tlId);
-    if (col) {
-      col.showCpuMovePreview(move.from, move.to, isWhite, false);
-    }
-
-    // Store pending move and execute after tiny pause (200ms for normal moves)
-    this.cpuPendingMove = { tlId, move, isTimeTravel: false, isCrossTimeline: false };
-
-    window.setTimeout(() => this._cpuExecutePendingMove(), 200);
-    return true;
+    return move;
   }
 
   /** Execute the pending CPU move after preview delay */
@@ -3210,6 +3288,45 @@ timelines - list timelines`,
       blackToggle.textContent = this.cpuBlackEnabled ? 'ON' : 'OFF';
       blackToggle.classList.toggle('active', this.cpuBlackEnabled);
     }
+
+    // Update Stockfish toggle
+    const sfToggle = document.getElementById('cpu-stockfish-toggle');
+    if (sfToggle) {
+      const available = stockfish.available;
+      sfToggle.textContent = this.cpuUseStockfish ? (available ? 'ON' : 'Loading...') : 'OFF';
+      sfToggle.classList.toggle('active', this.cpuUseStockfish && available);
+      sfToggle.classList.toggle('loading', this.cpuUseStockfish && !available);
+    }
+
+    // Update Stockfish status indicator
+    const sfStatus = document.getElementById('cpu-stockfish-status');
+    if (sfStatus) {
+      sfStatus.textContent = stockfish.available ? 'Ready' : 'Not loaded';
+      sfStatus.classList.toggle('ready', stockfish.available);
+    }
+  }
+
+  /** Set Stockfish skill level (0-20) */
+  setStockfishSkill(level: number): void {
+    this.cpuStockfishSkill = Math.max(0, Math.min(20, level));
+    stockfish.setSkillLevel(this.cpuStockfishSkill);
+  }
+
+  /** Set Stockfish search depth (1-20) */
+  setStockfishDepth(depth: number): void {
+    this.cpuStockfishDepth = Math.max(1, Math.min(20, depth));
+    stockfish.setSearchDepth(this.cpuStockfishDepth);
+  }
+
+  /** Toggle Stockfish usage */
+  toggleStockfish(): void {
+    this.cpuUseStockfish = !this.cpuUseStockfish;
+    this._updateCpuUI();
+  }
+
+  /** Check if Stockfish is available */
+  isStockfishAvailable(): boolean {
+    return stockfish.available;
   }
 }
 
