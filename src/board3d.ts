@@ -2297,21 +2297,21 @@ class Board3DManager implements IBoard3D {
     type: 'portal' | 'capture';
   }> = [];
 
-  // Use WHITE CHESS symbols (outlined) for both colors to avoid emoji rendering
-  // The fill/stroke colors in _pieceTexture() distinguish white vs black pieces
+  // WHITE pieces use outlined Unicode symbols (♔♕♖♗♘♙)
+  // BLACK pieces use FILLED Unicode symbols (♚♛♜♝♞♟) for maximum distinction
   readonly PIECE_CHARS: PieceCharMap = {
-    K: '\u2654',  // ♔ WHITE CHESS KING
+    K: '\u2654',  // ♔ WHITE CHESS KING (outlined)
     Q: '\u2655',  // ♕ WHITE CHESS QUEEN
     R: '\u2656',  // ♖ WHITE CHESS ROOK
     B: '\u2657',  // ♗ WHITE CHESS BISHOP
     N: '\u2658',  // ♘ WHITE CHESS KNIGHT
     P: '\u2659',  // ♙ WHITE CHESS PAWN
-    k: '\u2654',  // Use white glyph, colored dark by _pieceTexture
-    q: '\u2655',
-    r: '\u2656',
-    b: '\u2657',
-    n: '\u2658',
-    p: '\u2659',
+    k: '\u265A',  // ♚ BLACK CHESS KING (filled/solid)
+    q: '\u265B',  // ♛ BLACK CHESS QUEEN
+    r: '\u265C',  // ♜ BLACK CHESS ROOK
+    b: '\u265D',  // ♝ BLACK CHESS BISHOP
+    n: '\u265E',  // ♞ BLACK CHESS KNIGHT
+    p: '\u265F',  // ♟ BLACK CHESS PAWN
   };
 
   readonly TIMELINE_COLORS: number[] = [
@@ -2932,7 +2932,7 @@ class Board3DManager implements IBoard3D {
     this.scene.add(this.particleSystem);
   }
 
-  /* piece texture factory */
+  /* piece texture factory - MAXIMUM DISTINCTION between white and black */
   private _pieceTexture(symbol: string, isWhite: boolean): Texture {
     const key = symbol + (isWhite ? 'w' : 'b');
     if (this._texCache[key]) return this._texCache[key];
@@ -2942,30 +2942,37 @@ class Board3DManager implements IBoard3D {
     cv.height = s;
     const ctx = cv.getContext('2d')!;
     ctx.clearRect(0, 0, s, s);
-    ctx.font = s * 0.78 + 'px serif';
+    ctx.font = `bold ${s * 0.82}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
     if (isWhite) {
-      ctx.shadowColor = 'rgba(0,0,0,0.5)';
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = '#f0ece0';
+      // WHITE pieces: bright cream/ivory with dark outline
+      // Warm glow
+      ctx.shadowColor = 'rgba(255,240,200,0.6)';
+      ctx.shadowBlur = 12;
+      // Dark outline for contrast
+      ctx.strokeStyle = '#1a1510';
+      ctx.lineWidth = 10;
+      ctx.strokeText(symbol, s / 2, s / 2);
+      ctx.lineWidth = 6;
+      ctx.strokeText(symbol, s / 2, s / 2);
+      // Bright cream fill
+      ctx.fillStyle = '#fffef5';
       ctx.fillText(symbol, s / 2, s / 2);
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(40,30,10,0.25)';
-      ctx.lineWidth = 1.5;
-      ctx.strokeText(symbol, s / 2, s / 2);
     } else {
-      // Black pieces: same outline style as white but with dark fill and visible lighter outline
-      // Makes black pieces clearly readable against the dark board
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = '#1a1a2e';  // Dark navy fill
-      ctx.fillText(symbol, s / 2, s / 2);
-      ctx.shadowBlur = 0;
-      // Lighter outline so piece shape is clearly visible (matching white's stroke approach)
-      ctx.strokeStyle = '#b0b0c8';
-      ctx.lineWidth = 2;
+      // BLACK pieces: jet black with cyan/teal outline (different from white's dark outline)
+      // Uses filled Unicode symbols (♚♛♜♝♞♟) which are solid
+      // Cyan outline makes black pieces unmistakably different from white
+      ctx.strokeStyle = '#00dddd';
+      ctx.lineWidth = 12;
       ctx.strokeText(symbol, s / 2, s / 2);
+      ctx.lineWidth = 8;
+      ctx.strokeText(symbol, s / 2, s / 2);
+      // Pure black fill
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillText(symbol, s / 2, s / 2);
     }
     const tex = new THREE.CanvasTexture(cv);
     this._texCache[key] = tex;

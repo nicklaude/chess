@@ -636,12 +636,27 @@ class GameManager {
     const panel = document.getElementById('timeline-panel');
     const header = document.getElementById('timeline-header');
     const resizeHandle = document.getElementById('timeline-resize');
+    const listEl = document.getElementById('timeline-list');
     if (!panel || !header) return;
 
     // Collapse/expand on header click
     header.addEventListener('click', () => {
       panel.classList.toggle('collapsed');
     });
+
+    // Event delegation for timeline item clicks - always works even during DOM updates
+    if (listEl) {
+      listEl.addEventListener('click', (e: Event) => {
+        const target = e.target as HTMLElement;
+        // Find the closest .tl-item parent
+        const item = target.closest('.tl-item:not(.empty)') as HTMLElement | null;
+        if (item && item.dataset.tlId !== undefined) {
+          const tlId = parseInt(item.dataset.tlId);
+          console.log('[TIMELINE_CLICK_DELEGATED] Clicked timeline', tlId, 'current active:', this.activeTimelineId);
+          this.setActiveTimeline(tlId);
+        }
+      });
+    }
 
     // Resize functionality
     if (!resizeHandle) return;
@@ -1028,14 +1043,21 @@ timelines - list timelines`,
 
   /* -- Click handling -- */
   handleClick(info: SquareClickInfo): void {
-    // RACE CONDITION PREVENTION: Ignore clicks while CPU move is pending execution
-    // This prevents user interaction from interfering with the pending move's render cycle
+    const tlId = info.timelineId;
+
+    // If CPU move is pending, only allow camera focus (no piece interaction)
+    // This allows user to navigate to see different boards while CPU plays
     if (this.cpuPendingMove) {
-      console.log('[handleClick] Ignoring click - CPU move pending');
-      return;
+      console.log('[handleClick] CPU move pending - allowing camera focus only');
+      // Allow focusing on clicked timeline even during CPU play
+      if (tlId !== this.activeTimelineId) {
+        this.setActiveTimeline(tlId);
+      } else {
+        Board3D.focusTimeline(tlId, true);
+      }
+      return; // Don't process piece selection/movement
     }
 
-    const tlId = info.timelineId;
     const sq = info.square;
     const isHistory = info.isHistory;
     const turn = info.turn;
@@ -1072,9 +1094,12 @@ timelines - list timelines`,
       );
       if (target) {
         // Execute cross-timeline move!
+        // sourceSquare is where piece is on source board
+        // targetSquare (sq) is where user clicked to land on target board
         this.makeCrossTimelineMove(
           this.crossTimelineSelection.sourceTimelineId,
           tlId,
+          this.crossTimelineSelection.sourceSquare,
           sq as Square,
           this.crossTimelineSelection.piece
         );
@@ -1087,6 +1112,10 @@ timelines - list timelines`,
     // Clicking on a non-active timeline's current board -> switch to it
     if (tlId !== this.activeTimelineId) {
       this.setActiveTimeline(tlId);
+    } else {
+      // Clicking the active timeline - still focus camera on it
+      // (useful when camera has been moved away during CPU play)
+      Board3D.focusTimeline(tlId, true);
     }
 
     // Normal board interaction on active timeline
@@ -1539,32 +1568,186 @@ timelines - list timelines`,
       // so both must be at same move count (synced)
       if (targetTl.moveHistory.length !== sourceMoveCount) continue;
 
-      // Check the same square in the target timeline
-      const targetPiece = targetTl.chess.get(square);
+      // NEW RULE: Piece can only land on squares it could legally reach on the target board
+      // Calculate legal landing squares by simulating the piece at its source square on the target board
+      const legalLandingSquares = this._getLegalCrossTimelineLandingSquares(
+        targetTl.chess,
+        square,
+        piece,
+        sourceColor
+      );
 
-      // Can't move if own piece is there
-      if (targetPiece && targetPiece.color === sourceColor) continue;
+      // Add each legal landing square as a target
+      for (const targetSquare of legalLandingSquares) {
+        const targetPiece = targetTl.chess.get(targetSquare);
 
-      // CANNOT capture kings - that would break the game
-      if (targetPiece && targetPiece.type === 'k') continue;
+        // Can't move if own piece is there
+        if (targetPiece && targetPiece.color === sourceColor) continue;
 
-      // Valid target!
-      targets.push({
-        targetTimelineId: tlId,
-        targetSquare: square,
-        isCapture: targetPiece !== null,
-        capturedPiece: targetPiece,
-      });
+        // CANNOT capture kings - that would break the game
+        if (targetPiece && targetPiece.type === 'k') continue;
+
+        // Valid target!
+        targets.push({
+          targetTimelineId: tlId,
+          targetSquare: targetSquare as Square,
+          isCapture: targetPiece !== null,
+          capturedPiece: targetPiece,
+        });
+      }
     }
 
     return targets;
   }
 
-  /** Execute a cross-timeline move */
+  /**
+   * Calculate legal landing squares for a cross-timeline move.
+   * The piece arrives at its source square position on the target board,
+   * then can move to any square it could legally reach from there.
+   * Cannot capture immediately upon arrival (landing move is non-capturing).
+   */
+  private _getLegalCrossTimelineLandingSquares(
+    targetChess: ChessInstance,
+    sourceSquare: Square,
+    piece: Piece,
+    color: 'w' | 'b'
+  ): string[] {
+    const landingSquares: string[] = [];
+
+    // The piece appears at the source square position on the target board
+    // It can then move to any square reachable by that piece type from that position
+    // NOTE: We use piece movement patterns, not chess.js moves() because:
+    // 1. The piece doesn't exist on the target board yet
+    // 2. We need to consider where it COULD move if it were there
+
+    const file = sourceSquare.charCodeAt(0) - 97; // 0-7 (a-h)
+    const rank = parseInt(sourceSquare[1]) - 1;   // 0-7 (1-8)
+
+    // Get all squares this piece type can reach from the source square
+    const reachableSquares = this._getPieceReachableSquares(piece.type, file, rank, color, targetChess);
+
+    for (const sq of reachableSquares) {
+      const targetPiece = targetChess.get(sq as Square);
+
+      // Cross-timeline landing cannot capture (piece just "phases in")
+      // Only non-capture landings are valid
+      if (targetPiece === null) {
+        landingSquares.push(sq);
+      }
+    }
+
+    return landingSquares;
+  }
+
+  /**
+   * Get all squares a piece type can reach from a given position.
+   * This calculates pure movement patterns without considering check.
+   */
+  private _getPieceReachableSquares(
+    pieceType: PieceType,
+    file: number,
+    rank: number,
+    color: 'w' | 'b',
+    chess: ChessInstance
+  ): string[] {
+    const squares: string[] = [];
+
+    const addSquare = (f: number, r: number) => {
+      if (f >= 0 && f < 8 && r >= 0 && r < 8) {
+        squares.push(String.fromCharCode(97 + f) + (r + 1));
+      }
+    };
+
+    const addRaySquares = (df: number, dr: number) => {
+      let f = file + df;
+      let r = rank + dr;
+      while (f >= 0 && f < 8 && r >= 0 && r < 8) {
+        const sq = String.fromCharCode(97 + f) + (r + 1);
+        const piece = chess.get(sq as Square);
+        if (piece) {
+          // Can't pass through pieces (but we add it in case it's capturable - filtered later)
+          squares.push(sq);
+          break;
+        }
+        squares.push(sq);
+        f += df;
+        r += dr;
+      }
+    };
+
+    switch (pieceType) {
+      case 'p': // Pawn - only forward move (no captures for cross-timeline landing)
+        const dir = color === 'w' ? 1 : -1;
+        const startRank = color === 'w' ? 1 : 6;
+        // Single push
+        addSquare(file, rank + dir);
+        // Double push from starting rank
+        if (rank === startRank) {
+          addSquare(file, rank + 2 * dir);
+        }
+        break;
+
+      case 'n': // Knight
+        const knightMoves = [
+          [-2, -1], [-2, 1], [-1, -2], [-1, 2],
+          [1, -2], [1, 2], [2, -1], [2, 1]
+        ];
+        for (const [df, dr] of knightMoves) {
+          addSquare(file + df, rank + dr);
+        }
+        break;
+
+      case 'b': // Bishop - diagonal rays
+        addRaySquares(-1, -1);
+        addRaySquares(-1, 1);
+        addRaySquares(1, -1);
+        addRaySquares(1, 1);
+        break;
+
+      case 'r': // Rook - straight rays
+        addRaySquares(-1, 0);
+        addRaySquares(1, 0);
+        addRaySquares(0, -1);
+        addRaySquares(0, 1);
+        break;
+
+      case 'q': // Queen - all rays
+        addRaySquares(-1, -1);
+        addRaySquares(-1, 1);
+        addRaySquares(1, -1);
+        addRaySquares(1, 1);
+        addRaySquares(-1, 0);
+        addRaySquares(1, 0);
+        addRaySquares(0, -1);
+        addRaySquares(0, 1);
+        break;
+
+      case 'k': // King - one square any direction (though kings can't cross timelines)
+        for (let df = -1; df <= 1; df++) {
+          for (let dr = -1; dr <= 1; dr++) {
+            if (df !== 0 || dr !== 0) {
+              addSquare(file + df, rank + dr);
+            }
+          }
+        }
+        break;
+    }
+
+    return squares;
+  }
+
+  /** Execute a cross-timeline move
+   * @param sourceTimelineId - Timeline the piece is leaving
+   * @param targetTimelineId - Timeline the piece is arriving in
+   * @param sourceSquare - Where the piece is on the source board
+   * @param targetSquare - Where the piece lands on the target board (can be different from source)
+   * @param piece - The piece being moved
+   */
   private makeCrossTimelineMove(
     sourceTimelineId: number,
     targetTimelineId: number,
-    square: Square,
+    sourceSquare: Square,
+    targetSquare: Square,
     piece: Piece
   ): void {
     const sourceTl = this.timelines[sourceTimelineId];
@@ -1607,7 +1790,7 @@ timelines - list timelines`,
     }
 
     const isWhite = piece.color === 'w';
-    const targetPiece = targetTl.chess.get(square);
+    const targetPiece = targetTl.chess.get(targetSquare);
 
     // RACE CONDITION CHECK: Validate it's this piece's color's turn
     if ((isWhite && sourceTl.chess.turn() !== 'w') || (!isWhite && sourceTl.chess.turn() !== 'b')) {
@@ -1628,7 +1811,8 @@ timelines - list timelines`,
       targetTimelineName: targetTl.name,
       targetFen: targetTl.chess.fen(),
       targetTurn: targetTl.chess.turn(),
-      square,
+      sourceSquare,
+      targetSquare,
       piece: { type: piece.type, color: piece.color },
       pieceIsWhite: isWhite,
       targetPiece: targetPiece ? { type: targetPiece.type, color: targetPiece.color } : null,
@@ -1638,28 +1822,24 @@ timelines - list timelines`,
     const sourceBoardBefore = this._cloneBoard(sourceTl.chess);
     const targetBoardBefore = this._cloneBoard(targetTl.chess);
 
-    // 1. Remove piece from source timeline
-    // Load FEN, modify board, reload
+    // 1. Remove piece from source timeline at sourceSquare
     const sourceFen = sourceTl.chess.fen();
-    const sourceBoard = sourceTl.chess.board();
-    const pos = this._fromSq(square);
 
     // Verify piece exists on source before removal
-    const sourcePieceCheck = sourceTl.chess.get(square);
+    const sourcePieceCheck = sourceTl.chess.get(sourceSquare);
     if (!sourcePieceCheck || sourcePieceCheck.type !== piece.type || sourcePieceCheck.color !== piece.color) {
       console.error('[Cross-Timeline] Source piece mismatch!', {
         expected: piece,
         actual: sourcePieceCheck,
-        square,
+        sourceSquare,
       });
-      throw new Error(`Cross-timeline move failed: source piece mismatch at ${square}`);
+      throw new Error(`Cross-timeline move failed: source piece mismatch at ${sourceSquare}`);
     }
 
     // Build new FEN without the piece
-    // For simplicity, we set the square to empty and flip turn
     // Source: piece left, no capture on source timeline
     // skipSelfCheckValidation=true because the piece is LEAVING (check validation happens on target)
-    const newSourceFen = this._modifyFen(sourceFen, square, null, !isWhite, false, true);
+    const newSourceFen = this._modifyFen(sourceFen, sourceSquare, null, !isWhite, false, true);
     const sourceLoadResult = sourceTl.chess.load(newSourceFen);
     if (!sourceLoadResult) {
       console.error('[Cross-Timeline] Failed to load source FEN after remove!', { fen: newSourceFen });
@@ -1667,19 +1847,19 @@ timelines - list timelines`,
     }
 
     // Validate remove worked - piece should no longer be there
-    const afterRemove = sourceTl.chess.get(square);
+    const afterRemove = sourceTl.chess.get(sourceSquare);
     if (afterRemove) {
       console.error('[Cross-Timeline] Piece still present after removal!', {
-        square,
+        sourceSquare,
         stillThere: afterRemove,
       });
-      throw new Error(`Cross-timeline move failed: piece still present at ${square} after removal`);
+      throw new Error(`Cross-timeline move failed: piece still present at ${sourceSquare} after removal`);
     }
 
-    // 2. Add piece to target timeline (capture if enemy piece there)
+    // 2. Add piece to target timeline at targetSquare (capture if enemy piece there)
     const targetFen = targetTl.chess.fen();
     const isCrossCapture = targetPiece !== null;
-    const newTargetFen = this._modifyFen(targetFen, square, piece, !isWhite, isCrossCapture);
+    const newTargetFen = this._modifyFen(targetFen, targetSquare, piece, !isWhite, isCrossCapture);
     const targetLoadResult = targetTl.chess.load(newTargetFen);
     if (!targetLoadResult) {
       console.error('[Cross-Timeline] Failed to load target FEN after placement!', { fen: newTargetFen });
@@ -1687,39 +1867,49 @@ timelines - list timelines`,
     }
 
     // Validate placement worked - piece should now be there
-    const afterPlace = targetTl.chess.get(square);
+    const afterPlace = targetTl.chess.get(targetSquare);
     if (!afterPlace || afterPlace.type !== piece.type || afterPlace.color !== piece.color) {
       console.error('[Cross-Timeline] Piece placement verification failed!', {
         expected: piece,
         actual: afterPlace,
-        square,
+        targetSquare,
       });
-      throw new Error(`Cross-timeline move failed: piece not found at ${square} after placement`);
+      throw new Error(`Cross-timeline move failed: piece not found at ${targetSquare} after placement`);
     }
 
     // 3. Record the move in both timelines
     // Use actual piece character (not hardcoded Q) for future extensibility
     const pieceChar = piece.type.toUpperCase();
+    // Show source and target squares if different, otherwise just the square
+    const moveNotation = sourceSquare === targetSquare
+      ? `${pieceChar}${sourceSquare}→T${targetTimelineId}`
+      : `${pieceChar}${sourceSquare}→${targetSquare}@T${targetTimelineId}`;
     const crossMove: Move = {
-      from: square,
-      to: square,
+      from: sourceSquare,
+      to: targetSquare,
       piece: piece.type,
       captured: targetPiece?.type || null,
-      san: `${pieceChar}${square}→T${targetTimelineId}`,  // Custom notation for cross-timeline
+      san: moveNotation,
       isWhite,
     };
 
-    // Source timeline: piece left
+    // Source timeline: piece left (show departure notation)
+    const sourceSan = sourceSquare === targetSquare
+      ? `${pieceChar}${sourceSquare}→T${targetTimelineId}`
+      : `${pieceChar}${sourceSquare}→${targetSquare}@T${targetTimelineId}`;
     sourceTl.moveHistory.push({
       ...crossMove,
-      san: `${pieceChar}${square}→T${targetTimelineId}`,
+      san: sourceSan,
     });
     sourceTl.snapshots.push(this._cloneBoard(sourceTl.chess));
 
-    // Target timeline: piece arrived (possibly captured)
+    // Target timeline: piece arrived (show arrival notation)
+    const targetSan = sourceSquare === targetSquare
+      ? `${pieceChar}${targetSquare}←T${sourceTimelineId}`
+      : `${pieceChar}${sourceSquare}→${targetSquare}←T${sourceTimelineId}`;
     targetTl.moveHistory.push({
       ...crossMove,
-      san: `${pieceChar}${square}←T${sourceTimelineId}`,
+      san: targetSan,
     });
     targetTl.snapshots.push(this._cloneBoard(targetTl.chess));
 
@@ -1728,17 +1918,19 @@ timelines - list timelines`,
     const targetCol = Board3D.getTimeline(targetTimelineId);
 
     if (sourceCol) {
-      sourceCol.addSnapshot(this._getSnapshotBoard(sourceBoardBefore), square, square, isWhite);
-      sourceCol.showLastMove(square, square);
+      // On source board, highlight where piece left from
+      sourceCol.addSnapshot(this._getSnapshotBoard(sourceBoardBefore), sourceSquare, sourceSquare, isWhite);
+      sourceCol.showLastMove(sourceSquare, sourceSquare);
     }
 
     if (targetCol) {
-      targetCol.addSnapshot(this._getSnapshotBoard(targetBoardBefore), square, square, isWhite);
-      targetCol.showLastMove(square, square);
+      // On target board, highlight where piece arrived
+      targetCol.addSnapshot(this._getSnapshotBoard(targetBoardBefore), targetSquare, targetSquare, isWhite);
+      targetCol.showLastMove(targetSquare, targetSquare);
     }
 
-    // Draw line between timelines to show the move
-    Board3D.addCrossTimelineLine(sourceTimelineId, targetTimelineId, square, isWhite);
+    // Draw line between timelines to show the move (use target square for the visual)
+    Board3D.addCrossTimelineLine(sourceTimelineId, targetTimelineId, targetSquare, isWhite);
 
     // Notify that snapshots were added - triggers branch line rebuild
     Board3D.notifySnapshotAdded(sourceTimelineId);
@@ -1746,7 +1938,7 @@ timelines - list timelines`,
 
     // Spawn capture effect on target timeline if capture occurred
     if (targetPiece) {
-      Board3D.spawnCaptureEffect(targetTimelineId, square);
+      Board3D.spawnCaptureEffect(targetTimelineId, targetSquare);
     }
 
     // TURN DEBUG: Log turn state after cross-timeline move completed
@@ -1766,7 +1958,8 @@ timelines - list timelines`,
       timestamp: Date.now(),
       sourceTimelineId,
       targetTimelineId,
-      square,
+      sourceSquare,
+      targetSquare,
     });
     this.clearSelection();
     this.renderTimeline(sourceTimelineId);
@@ -2748,17 +2941,7 @@ timelines - list timelines`,
 
       listEl.innerHTML = html;
       this._lastTimelineStructure = structureKey;
-
-      // Attach click handlers
-      const items = listEl.querySelectorAll('.tl-item:not(.empty)');
-      items.forEach((item) => {
-        const tlId = parseInt((item as HTMLElement).dataset.tlId || '0');
-        item.addEventListener('click', (e) => {
-          e.stopPropagation(); // Prevent any bubbling issues
-          console.log('[TIMELINE_CLICK] Clicked timeline', tlId, 'current active:', this.activeTimelineId);
-          this.setActiveTimeline(tlId);
-        });
-      });
+      // Click handlers are now managed via event delegation in _setupTimelinePanel()
     } else {
       // Just update active state and move counts in place (no scroll jump)
       const items = listEl.querySelectorAll('.tl-item');
@@ -3429,7 +3612,7 @@ timelines - list timelines`,
     isTimeTravel: boolean;
     isCrossTimeline: boolean;
     timeTravelData?: { sourceSquare: Square; targetTurnIndex: number; piece: Piece; capturedPiece: Piece | null | undefined };
-    crossTimelineData?: { targetTimelineId: number; square: Square; piece: Piece };
+    crossTimelineData?: { targetTimelineId: number; sourceSquare: Square; targetSquare: Square; piece: Piece };
   } | null = null;
 
   /** Make a CPU move on the given timeline (with preview pause) */
@@ -3500,13 +3683,14 @@ timelines - list timelines`,
       // Store pending move and execute immediately (indicator shown after)
       this.cpuPendingMove = {
         tlId,
-        move: { from: crossTimelineMove.square, to: crossTimelineMove.square } as ChessMove,
+        move: { from: crossTimelineMove.sourceSquare, to: crossTimelineMove.targetSquare } as ChessMove,
         isWhite,
         isTimeTravel: false,
         isCrossTimeline: true,
         crossTimelineData: {
           targetTimelineId: crossTimelineMove.targetTimelineId,
-          square: crossTimelineMove.square,
+          sourceSquare: crossTimelineMove.sourceSquare,
+          targetSquare: crossTimelineMove.targetSquare,
           piece: crossTimelineMove.piece,
         },
       };
@@ -3609,17 +3793,20 @@ timelines - list timelines`,
           from: tlId,
           to: crossTimelineData.targetTimelineId,
           piece: crossTimelineData.piece.type,
+          sourceSquare: crossTimelineData.sourceSquare,
+          targetSquare: crossTimelineData.targetSquare,
         });
         this.makeCrossTimelineMove(
           tlId,
           crossTimelineData.targetTimelineId,
-          crossTimelineData.square,
+          crossTimelineData.sourceSquare,
+          crossTimelineData.targetSquare,
           crossTimelineData.piece
         );
         // Show indicator on source square after move completes
         const col = Board3D.getTimeline(tlId);
         if (col) {
-          col.showCpuMovePreview(crossTimelineData.square, crossTimelineData.square, isWhite, false);
+          col.showCpuMovePreview(crossTimelineData.sourceSquare, crossTimelineData.targetSquare, isWhite, false);
           window.setTimeout(() => col.clearCpuMovePreview(), 800);
         }
         return true;
@@ -3701,7 +3888,7 @@ timelines - list timelines`,
    * 5D-Aware CPU: Check for cross-timeline opportunities with strategic evaluation.
    * Considers board evaluations across ALL timelines to decide when to cross.
    */
-  private _cpuCheckCrossTimeline(tlId: number): { targetTimelineId: number; square: Square; piece: Piece; isCapture: boolean } | null {
+  private _cpuCheckCrossTimeline(tlId: number): { targetTimelineId: number; sourceSquare: Square; targetSquare: Square; piece: Piece; isCapture: boolean } | null {
     const tl = this.timelines[tlId];
     if (!tl) return null;
 
@@ -3729,7 +3916,8 @@ timelines - list timelines`,
     // Collect all cross-timeline opportunities with strategic scoring
     const opportunities: Array<{
       targetTimelineId: number;
-      square: Square;
+      sourceSquare: Square;
+      targetSquare: Square;
       piece: Piece;
       isCapture: boolean;
       bias: number;
@@ -3744,8 +3932,8 @@ timelines - list timelines`,
           const baseBias = portalBiases[piece.type] || 0.1;
           if (baseBias <= 0) continue;
 
-          const square = (String.fromCharCode(97 + c) + (8 - r)) as Square;
-          const targets = this.getCrossTimelineTargets(tlId, square, piece);
+          const sourceSquare = (String.fromCharCode(97 + c) + (8 - r)) as Square;
+          const targets = this.getCrossTimelineTargets(tlId, sourceSquare, piece);
 
           for (const target of targets) {
             const targetEval = timelineEvals[target.targetTimelineId] || 0;
@@ -3786,7 +3974,8 @@ timelines - list timelines`,
 
             opportunities.push({
               targetTimelineId: target.targetTimelineId,
-              square,
+              sourceSquare,
+              targetSquare: target.targetSquare,
               piece,
               isCapture: target.isCapture,
               bias: baseBias,
@@ -3809,12 +3998,13 @@ timelines - list timelines`,
     // 5D Aggressive mode: use slider-controlled cross-timeline chance
     for (const opp of opportunities) {
       // LOOP DETECTION: Check if this would be a ping-pong move
-      if (this._wouldBePingPongMove(tlId, opp.targetTimelineId, opp.square, opp.piece.type)) {
+      if (this._wouldBePingPongMove(tlId, opp.targetTimelineId, opp.targetSquare, opp.piece.type)) {
         console.log('[CPU 5D] Skipping cross-timeline - would be ping-pong', {
           from: tlId,
           to: opp.targetTimelineId,
           piece: opp.piece.type,
-          square: opp.square,
+          sourceSquare: opp.sourceSquare,
+          targetSquare: opp.targetSquare,
         });
         continue; // Skip this opportunity, try next
       }
@@ -3829,17 +4019,20 @@ timelines - list timelines`,
           from: tlId,
           to: opp.targetTimelineId,
           piece: opp.piece.type,
+          sourceSquare: opp.sourceSquare,
+          targetSquare: opp.targetSquare,
           isCapture: opp.isCapture,
           strategicScore: opp.strategicScore,
           chance: Math.round(totalChance * 100) + '%',
         });
 
         // Record this move in history for loop detection
-        this._recordCrossTimelineMove(tlId, opp.targetTimelineId, opp.square, opp.piece.type);
+        this._recordCrossTimelineMove(tlId, opp.targetTimelineId, opp.targetSquare, opp.piece.type);
 
         return {
           targetTimelineId: opp.targetTimelineId,
-          square: opp.square,
+          sourceSquare: opp.sourceSquare,
+          targetSquare: opp.targetSquare,
           piece: opp.piece,
           isCapture: opp.isCapture,
         };
