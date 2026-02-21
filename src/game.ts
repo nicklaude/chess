@@ -933,6 +933,13 @@ timelines - list timelines`,
     this.timelines[id].snapshots.push(this._cloneBoard(chess));
 
     Board3D.createTimeline(id, xOffset);
+
+    // If in 2D mode, refresh the grid to include the new timeline
+    if (Board3D.is2DMode()) {
+      Board3D.set2DMode(false);
+      Board3D.set2DMode(true);
+    }
+
     return this.timelines[id];
   }
 
