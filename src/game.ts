@@ -146,86 +146,94 @@ class GameManager {
     // The Immortal Game - Anderssen vs Kieseritzky, London 1851
     // One of the most famous chess games ever played, showcasing brilliant sacrifices
     // Anderssen sacrifices both rooks, his bishop, and his queen to deliver checkmate!
-    const moves = [
-      { from: 'e2', to: 'e4' },     // 1. e4
-      { from: 'e7', to: 'e5' },     // 1... e5
-      { from: 'f2', to: 'f4' },     // 2. f4 (King's Gambit)
-      { from: 'e5', to: 'f4' },     // 2... exf4
-      { from: 'f1', to: 'c4' },     // 3. Bc4
-      { from: 'd8', to: 'h4' },     // 3... Qh4+ (check!)
-      { from: 'e1', to: 'f1' },     // 4. Kf1
-      { from: 'b7', to: 'b5' },     // 4... b5?! (Bryan Countergambit)
-      { from: 'c4', to: 'b5' },     // 5. Bxb5
-      { from: 'g8', to: 'f6' },     // 5... Nf6
-      { from: 'g1', to: 'f3' },     // 6. Nf3
-      { from: 'h4', to: 'h6' },     // 6... Qh6
-      { from: 'd2', to: 'd3' },     // 7. d3
-      { from: 'f6', to: 'h5' },     // 7... Nh5
-      { from: 'f3', to: 'h4' },     // 8. Nh4
-      { from: 'h6', to: 'g5' },     // 8... Qg5
-      { from: 'h4', to: 'f5' },     // 9. Nf5
-      { from: 'c7', to: 'c6' },     // 9... c6
-      { from: 'g2', to: 'g4' },     // 10. g4!
-      { from: 'h5', to: 'f6' },     // 10... Nf6
-      { from: 'h1', to: 'g1' },     // 11. Rg1!
-      { from: 'c6', to: 'b5' },     // 11... cxb5
-      { from: 'h2', to: 'h4' },     // 12. h4!
-      { from: 'g5', to: 'g6' },     // 12... Qg6
-      { from: 'h4', to: 'h5' },     // 13. h5
-      { from: 'g6', to: 'g5' },     // 13... Qg5
-      { from: 'd1', to: 'f3' },     // 14. Qf3
-      { from: 'f6', to: 'g8' },     // 14... Ng8
-      { from: 'c1', to: 'f4' },     // 15. Bxf4
-      { from: 'g5', to: 'f6' },     // 15... Qf6
-      { from: 'b1', to: 'c3' },     // 16. Nc3
-      { from: 'f8', to: 'c5' },     // 16... Bc5
-      { from: 'c3', to: 'd5' },     // 17. Nd5!
-      { from: 'f6', to: 'b2' },     // 17... Qxb2 (takes rook's pawn)
-      { from: 'f4', to: 'd6' },     // 18. Bd6!! (sacrifices rook a1)
-      { from: 'c5', to: 'g1' },     // 18... Bxg1 (takes rook!)
-      { from: 'e4', to: 'e5' },     // 19. e5!! (another sacrifice)
-      { from: 'b2', to: 'a1' },     // 19... Qxa1+ (takes other rook!)
-      { from: 'f1', to: 'e2' },     // 20. Ke2
-      { from: 'b8', to: 'a6' },     // 20... Na6
-      { from: 'f5', to: 'g7' },     // 21. Nxg7+
-      { from: 'e8', to: 'd8' },     // 21... Kd8
-      { from: 'f3', to: 'f6' },     // 22. Qf6+!! (queen sacrifice!)
-      { from: 'g8', to: 'f6' },     // 22... Nxf6
-      { from: 'd6', to: 'e7' },     // 23. Be7# CHECKMATE!
+    const demoMoves: Array<{
+      type: 'move' | 'timetravel' | 'crossTimeline';
+      from?: string;
+      to?: string;
+      timeline?: number;
+      targetTurn?: number;
+      targetTimeline?: number;
+    }> = [
+      { type: 'move', from: 'e2', to: 'e4' },     // 1. e4
+      { type: 'move', from: 'e7', to: 'e5' },     // 1... e5
+      { type: 'move', from: 'f2', to: 'f4' },     // 2. f4 (King's Gambit)
+      { type: 'move', from: 'e5', to: 'f4' },     // 2... exf4
+      { type: 'move', from: 'f1', to: 'c4' },     // 3. Bc4
+      { type: 'move', from: 'd8', to: 'h4' },     // 3... Qh4+ (check!)
+      { type: 'move', from: 'e1', to: 'f1' },     // 4. Kf1
+      { type: 'move', from: 'b7', to: 'b5' },     // 4... b5?! (Bryan Countergambit)
+      { type: 'move', from: 'c4', to: 'b5' },     // 5. Bxb5
+      { type: 'move', from: 'g8', to: 'f6' },     // 5... Nf6
+      { type: 'move', from: 'g1', to: 'f3' },     // 6. Nf3
+      { type: 'move', from: 'h4', to: 'h6' },     // 6... Qh6
+      { type: 'move', from: 'd2', to: 'd3' },     // 7. d3
+      { type: 'move', from: 'f6', to: 'h5' },     // 7... Nh5
+      { type: 'move', from: 'f3', to: 'h4' },     // 8. Nh4
+      { type: 'move', from: 'h6', to: 'g5' },     // 8... Qg5
+      { type: 'move', from: 'h4', to: 'f5' },     // 9. Nf5
+      { type: 'move', from: 'c7', to: 'c6' },     // 9... c6
+      { type: 'move', from: 'g2', to: 'g4' },     // 10. g4!
+      { type: 'move', from: 'h5', to: 'f6' },     // 10... Nf6
+      { type: 'move', from: 'h1', to: 'g1' },     // 11. Rg1!
+      { type: 'move', from: 'c6', to: 'b5' },     // 11... cxb5
+      { type: 'move', from: 'h2', to: 'h4' },     // 12. h4!
+      { type: 'move', from: 'g5', to: 'g6' },     // 12... Qg6
+      { type: 'move', from: 'h4', to: 'h5' },     // 13. h5
+      { type: 'move', from: 'g6', to: 'g5' },     // 13... Qg5
+      { type: 'move', from: 'd1', to: 'f3' },     // 14. Qf3
+      { type: 'move', from: 'f6', to: 'g8' },     // 14... Ng8
+      { type: 'move', from: 'c1', to: 'f4' },     // 15. Bxf4
+      { type: 'move', from: 'g5', to: 'f6' },     // 15... Qf6
+      { type: 'move', from: 'b1', to: 'c3' },     // 16. Nc3
+      { type: 'move', from: 'f8', to: 'c5' },     // 16... Bc5
+      { type: 'move', from: 'c3', to: 'd5' },     // 17. Nd5!
+      { type: 'move', from: 'f6', to: 'b2' },     // 17... Qxb2 (takes rook's pawn)
+      { type: 'move', from: 'f4', to: 'd6' },     // 18. Bd6!! (sacrifices rook a1)
+      { type: 'move', from: 'c5', to: 'g1' },     // 18... Bxg1 (takes rook!)
+      { type: 'move', from: 'e4', to: 'e5' },     // 19. e5!! (another sacrifice)
+      { type: 'move', from: 'b2', to: 'a1' },     // 19... Qxa1+ (takes other rook!)
+      { type: 'move', from: 'f1', to: 'e2' },     // 20. Ke2
+      { type: 'move', from: 'b8', to: 'a6' },     // 20... Na6
+      { type: 'move', from: 'f5', to: 'g7' },     // 21. Nxg7+
+      { type: 'move', from: 'e8', to: 'd8' },     // 21... Kd8
+      { type: 'move', from: 'f3', to: 'f6' },     // 22. Qf6+!! (queen sacrifice!)
+      { type: 'move', from: 'g8', to: 'f6' },     // 22... Nxf6
+      { type: 'move', from: 'd6', to: 'e7' },     // 23. Be7# CHECKMATE!
     ];
 
     let moveIndex = 0;
     const playNextMove = () => {
-      if (!this._examplePlaying || moveIndex >= moves.length) {
+      if (!this._examplePlaying || moveIndex >= demoMoves.length) {
         // The Immortal Game ends in checkmate - demo complete!
         // Just stop playing (no CPU needed, game is over)
         this._stopExamplePlay();
         return;
       }
 
-      const move = moves[moveIndex];
-      const tl = this.timelines[this.activeTimelineId];
-      if (tl) {
+      const action = demoMoves[moveIndex];
+      const tlId = action.timeline ?? this.activeTimelineId;
+      const tl = this.timelines[tlId];
+
+      if (tl && action.type === 'move' && action.from && action.to) {
         try {
-          // Find the valid chess move from the position
           const validMoves = tl.chess.moves({ verbose: true }) as ChessMove[];
-          const chessMove = validMoves.find(m => m.from === move.from && m.to === move.to);
+          const chessMove = validMoves.find(m => m.from === action.from && m.to === action.to);
           if (chessMove) {
-            this.makeMove(this.activeTimelineId, chessMove);
+            this.makeMove(tlId, chessMove);
           } else {
-            console.warn('[ExamplePlay] Move not found in legal moves:', move);
+            console.warn('[Demo] Move not found:', action);
           }
         } catch (e) {
-          console.warn('[ExamplePlay] Move failed:', move, e);
+          console.warn('[Demo] Move failed:', action, e);
         }
       }
 
       moveIndex++;
-      this._exampleTimer = window.setTimeout(playNextMove, 300);
+      this._exampleTimer = window.setTimeout(playNextMove, 400);
     };
 
     // Start playing
-    this._exampleTimer = window.setTimeout(playNextMove, 200);
+    this._exampleTimer = window.setTimeout(playNextMove, 300);
   }
 
   private _stopExamplePlay(): void {
@@ -3126,6 +3134,15 @@ timelines - list timelines`,
   private cpuCrossTimelineChance = 0.75;  // Base chance for cross-timeline moves (0-1)
   private cpuTimeTravelChance = 0.5;      // Base chance for time travel moves (0-1)
 
+  // Cross-timeline loop detection - prevent ping-pong moves
+  private recentCrossTimelineMoves: Array<{
+    sourceTimelineId: number;
+    targetTimelineId: number;
+    square: string;
+    pieceType: string;
+  }> = [];
+  private crossTimelineHistorySize = 6;  // Track last 6 cross-timeline moves
+
   // Stockfish settings
   private cpuUseStockfish = true;  // Use Stockfish when available
   private cpuStockfishSkillWhite = 10;  // Skill level 0-20 for White
@@ -3791,6 +3808,17 @@ timelines - list timelines`,
 
     // 5D Aggressive mode: use slider-controlled cross-timeline chance
     for (const opp of opportunities) {
+      // LOOP DETECTION: Check if this would be a ping-pong move
+      if (this._wouldBePingPongMove(tlId, opp.targetTimelineId, opp.square, opp.piece.type)) {
+        console.log('[CPU 5D] Skipping cross-timeline - would be ping-pong', {
+          from: tlId,
+          to: opp.targetTimelineId,
+          piece: opp.piece.type,
+          square: opp.square,
+        });
+        continue; // Skip this opportunity, try next
+      }
+
       // Base chance from slider, plus strategic bonus
       const baseChance = this.cpuCrossTimelineChance;
       const strategicBonus = opp.strategicScore * 0.10; // Each strategic point adds 10%
@@ -3805,6 +3833,10 @@ timelines - list timelines`,
           strategicScore: opp.strategicScore,
           chance: Math.round(totalChance * 100) + '%',
         });
+
+        // Record this move in history for loop detection
+        this._recordCrossTimelineMove(tlId, opp.targetTimelineId, opp.square, opp.piece.type);
+
         return {
           targetTimelineId: opp.targetTimelineId,
           square: opp.square,
@@ -3815,6 +3847,52 @@ timelines - list timelines`,
     }
 
     return null;
+  }
+
+  /** Check if a cross-timeline move would create a ping-pong pattern */
+  private _wouldBePingPongMove(sourceId: number, targetId: number, square: string, pieceType: string): boolean {
+    // Look at recent moves involving this piece type from same square
+    const relevantMoves = this.recentCrossTimelineMoves.filter(
+      m => m.square === square && m.pieceType === pieceType
+    );
+
+    if (relevantMoves.length < 1) return false;
+
+    // Check if the last move was the reverse (target→source)
+    const lastMove = relevantMoves[relevantMoves.length - 1];
+    if (lastMove.sourceTimelineId === targetId && lastMove.targetTimelineId === sourceId) {
+      return true; // Would immediately reverse the last move
+    }
+
+    // Check for A→B→A pattern in last 2 moves
+    if (relevantMoves.length >= 2) {
+      const secondLast = relevantMoves[relevantMoves.length - 2];
+      if (
+        secondLast.sourceTimelineId === sourceId &&
+        secondLast.targetTimelineId === targetId &&
+        lastMove.sourceTimelineId === targetId &&
+        lastMove.targetTimelineId === sourceId
+      ) {
+        return true; // Would create A→B→A→B pattern
+      }
+    }
+
+    return false;
+  }
+
+  /** Record a cross-timeline move for loop detection */
+  private _recordCrossTimelineMove(sourceId: number, targetId: number, square: string, pieceType: string): void {
+    this.recentCrossTimelineMoves.push({
+      sourceTimelineId: sourceId,
+      targetTimelineId: targetId,
+      square,
+      pieceType,
+    });
+
+    // Keep history limited
+    while (this.recentCrossTimelineMoves.length > this.crossTimelineHistorySize) {
+      this.recentCrossTimelineMoves.shift();
+    }
   }
 
   /** Evaluate material balance for a position (positive = color is winning) */
