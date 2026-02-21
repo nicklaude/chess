@@ -2110,6 +2110,9 @@ export class TimelineCol implements ITimelineCol {
     // Clear cross-timeline and time-travel targets
     this.clearCrossTimelineTargets();
     this.clearTimeTravelTargets();
+
+    // Clear CPU move preview indicators
+    this.clearCpuMovePreview();
   }
 
   destroy(): void {

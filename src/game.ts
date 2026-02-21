@@ -62,7 +62,7 @@ class GameManager {
 
   // Debounce timer for timeline hover highlighting
   private _highlightDebounceTimer: number | null = null;
-  private _highlightDebounceDelay = 50; // ms
+  private _highlightDebounceDelay = 150; // ms - increased to reduce flicker during rapid updates
 
   init(): void {
     Board3D.init('scene-container', (info) => this.handleClick(info));
@@ -932,6 +932,13 @@ timelines - list timelines`,
     this.timelines[id].snapshots.push(this._cloneBoard(chess));
 
     Board3D.createTimeline(id, xOffset);
+
+    // If in 2D mode, refresh the grid to include the new timeline
+    if (Board3D.is2DMode()) {
+      Board3D.set2DMode(false);
+      Board3D.set2DMode(true);
+    }
+
     return this.timelines[id];
   }
 
