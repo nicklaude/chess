@@ -3395,6 +3395,8 @@ timelines - list timelines`,
     if (Object.keys(this.timelines).length < this.maxTimelines) {
       const timeTravelMove = this._cpuCheckTimeTravel(tlId);
       if (timeTravelMove) {
+        // Clear ALL previews first to avoid out-of-sync indicators
+        Board3D.clearAllCpuPreviews();
         // Show preview for time travel move
         const col = Board3D.getTimeline(tlId);
         if (col) {
@@ -3415,8 +3417,8 @@ timelines - list timelines`,
           },
         };
 
-        // Execute after preview delay (300ms for time travel)
-        window.setTimeout(() => this._cpuExecutePendingMove(), 300);
+        // Execute after preview delay (100ms for time travel - reduced to minimize flicker)
+        window.setTimeout(() => this._cpuExecutePendingMove(), 100);
         return true;
       }
     }
@@ -3424,6 +3426,8 @@ timelines - list timelines`,
     // Check for cross-timeline opportunity (can always happen if multiple timelines exist)
     const crossTimelineMove = this._cpuCheckCrossTimeline(tlId);
     if (crossTimelineMove) {
+      // Clear ALL previews first to avoid out-of-sync indicators
+      Board3D.clearAllCpuPreviews();
       // Show preview for cross-timeline move
       const col = Board3D.getTimeline(tlId);
       if (col) {
@@ -3443,8 +3447,8 @@ timelines - list timelines`,
         },
       };
 
-      // Execute after preview delay (250ms for cross-timeline)
-      window.setTimeout(() => this._cpuExecutePendingMove(), 250);
+      // Execute after preview delay (100ms for cross-timeline - reduced to minimize flicker)
+      window.setTimeout(() => this._cpuExecutePendingMove(), 100);
       return true;
     }
 
@@ -3455,16 +3459,18 @@ timelines - list timelines`,
         return;
       }
 
+      // Clear ALL previews first to avoid out-of-sync indicators
+      Board3D.clearAllCpuPreviews();
       // Show preview before executing
       const col = Board3D.getTimeline(tlId);
       if (col) {
         col.showCpuMovePreview(move.from, move.to, isWhite, false);
       }
 
-      // Store pending move and execute after tiny pause (200ms for normal moves)
+      // Store pending move and execute after tiny pause (100ms for normal moves - reduced to minimize flicker)
       this.cpuPendingMove = { tlId, move, isTimeTravel: false, isCrossTimeline: false };
 
-      window.setTimeout(() => this._cpuExecutePendingMove(), 200);
+      window.setTimeout(() => this._cpuExecutePendingMove(), 100);
     });
 
     return true;

@@ -2561,6 +2561,13 @@ class Board3DManager implements IBoard3D {
     return this.timelineCols[id];
   }
 
+  /** Clear CPU move previews on ALL timelines */
+  clearAllCpuPreviews(): void {
+    for (const key in this.timelineCols) {
+      this.timelineCols[key].clearCpuMovePreview();
+    }
+  }
+
   removeTimeline(id: number): void {
     if (this.timelineCols[id]) {
       this.timelineCols[id].destroy();
