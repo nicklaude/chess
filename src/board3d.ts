@@ -2932,7 +2932,7 @@ class Board3DManager implements IBoard3D {
     this.scene.add(this.particleSystem);
   }
 
-  /* piece texture factory */
+  /* piece texture factory - BOLD DISTINCT pieces for visibility */
   private _pieceTexture(symbol: string, isWhite: boolean): Texture {
     const key = symbol + (isWhite ? 'w' : 'b');
     if (this._texCache[key]) return this._texCache[key];
@@ -2942,30 +2942,44 @@ class Board3DManager implements IBoard3D {
     cv.height = s;
     const ctx = cv.getContext('2d')!;
     ctx.clearRect(0, 0, s, s);
-    ctx.font = s * 0.78 + 'px serif';
+    // Larger font for more prominent pieces
+    ctx.font = `bold ${s * 0.85}px serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (isWhite) {
-      ctx.shadowColor = 'rgba(0,0,0,0.5)';
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = '#f0ece0';
-      ctx.fillText(symbol, s / 2, s / 2);
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(40,30,10,0.25)';
-      ctx.lineWidth = 1.5;
+      // WHITE pieces: bright white with strong dark outline
+      // Draw thick dark outline first (multiple passes for boldness)
+      ctx.strokeStyle = '#1a1a1a';
+      ctx.lineWidth = 8;
+      ctx.lineJoin = 'round';
       ctx.strokeText(symbol, s / 2, s / 2);
+      // Second outline pass for extra definition
+      ctx.lineWidth = 5;
+      ctx.strokeText(symbol, s / 2, s / 2);
+      // Fill with bright white
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(symbol, s / 2, s / 2);
+      // Inner highlight for 3D effect
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeText(symbol, s / 2 - 1, s / 2 - 1);
     } else {
-      // Black pieces: same outline style as white but with dark fill and visible lighter outline
-      // Makes black pieces clearly readable against the dark board
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = '#1a1a2e';  // Dark navy fill
-      ctx.fillText(symbol, s / 2, s / 2);
-      ctx.shadowBlur = 0;
-      // Lighter outline so piece shape is clearly visible (matching white's stroke approach)
-      ctx.strokeStyle = '#b0b0c8';
-      ctx.lineWidth = 2;
+      // BLACK pieces: jet black with bright white outline for maximum contrast
+      // Draw thick white outline first
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 8;
+      ctx.lineJoin = 'round';
       ctx.strokeText(symbol, s / 2, s / 2);
+      // Second outline pass
+      ctx.lineWidth = 5;
+      ctx.strokeText(symbol, s / 2, s / 2);
+      // Fill with jet black
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillText(symbol, s / 2, s / 2);
+      // Subtle inner shadow for depth
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeText(symbol, s / 2 + 1, s / 2 + 1);
     }
     const tex = new THREE.CanvasTexture(cv);
     this._texCache[key] = tex;
