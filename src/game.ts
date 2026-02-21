@@ -143,27 +143,63 @@ class GameManager {
       btn.textContent = '⏹ Stop';
     }
 
-    // Example game: Fool's Mate - the fastest possible checkmate (2 moves)
-    // This demonstrates a quick checkmate for testing purposes
-    // After checkmate, CPU takes over to continue playing on other timelines
+    // The Immortal Game - Anderssen vs Kieseritzky, London 1851
+    // One of the most famous chess games ever played, showcasing brilliant sacrifices
+    // Anderssen sacrifices both rooks, his bishop, and his queen to deliver checkmate!
     const moves = [
-      // Fool's Mate sequence - Black wins in 4 half-moves
-      { from: 'f2', to: 'f3' },   // 1. f3 (weakens king position)
-      { from: 'e7', to: 'e5' },   // 1... e5
-      { from: 'g2', to: 'g4' },   // 2. g4?? (blunder - exposes king diagonal)
-      { from: 'd8', to: 'h4' },   // 2... Qh4# (checkmate!)
+      { from: 'e2', to: 'e4' },     // 1. e4
+      { from: 'e7', to: 'e5' },     // 1... e5
+      { from: 'f2', to: 'f4' },     // 2. f4 (King's Gambit)
+      { from: 'e5', to: 'f4' },     // 2... exf4
+      { from: 'f1', to: 'c4' },     // 3. Bc4
+      { from: 'd8', to: 'h4' },     // 3... Qh4+ (check!)
+      { from: 'e1', to: 'f1' },     // 4. Kf1
+      { from: 'b7', to: 'b5' },     // 4... b5?! (Bryan Countergambit)
+      { from: 'c4', to: 'b5' },     // 5. Bxb5
+      { from: 'g8', to: 'f6' },     // 5... Nf6
+      { from: 'g1', to: 'f3' },     // 6. Nf3
+      { from: 'h4', to: 'h6' },     // 6... Qh6
+      { from: 'd2', to: 'd3' },     // 7. d3
+      { from: 'f6', to: 'h5' },     // 7... Nh5
+      { from: 'f3', to: 'h4' },     // 8. Nh4
+      { from: 'h6', to: 'g5' },     // 8... Qg5
+      { from: 'h4', to: 'f5' },     // 9. Nf5
+      { from: 'c7', to: 'c6' },     // 9... c6
+      { from: 'g2', to: 'g4' },     // 10. g4!
+      { from: 'h5', to: 'f6' },     // 10... Nf6
+      { from: 'h1', to: 'g1' },     // 11. Rg1!
+      { from: 'c6', to: 'b5' },     // 11... cxb5
+      { from: 'h2', to: 'h4' },     // 12. h4!
+      { from: 'g5', to: 'g6' },     // 12... Qg6
+      { from: 'h4', to: 'h5' },     // 13. h5
+      { from: 'g6', to: 'g5' },     // 13... Qg5
+      { from: 'd1', to: 'f3' },     // 14. Qf3
+      { from: 'f6', to: 'g8' },     // 14... Ng8
+      { from: 'c1', to: 'f4' },     // 15. Bxf4
+      { from: 'g5', to: 'f6' },     // 15... Qf6
+      { from: 'b1', to: 'c3' },     // 16. Nc3
+      { from: 'f8', to: 'c5' },     // 16... Bc5
+      { from: 'c3', to: 'd5' },     // 17. Nd5!
+      { from: 'f6', to: 'b2' },     // 17... Qxb2 (takes rook's pawn)
+      { from: 'f4', to: 'd6' },     // 18. Bd6!! (sacrifices rook a1)
+      { from: 'c5', to: 'g1' },     // 18... Bxg1 (takes rook!)
+      { from: 'e4', to: 'e5' },     // 19. e5!! (another sacrifice)
+      { from: 'b2', to: 'a1' },     // 19... Qxa1+ (takes other rook!)
+      { from: 'f1', to: 'e2' },     // 20. Ke2
+      { from: 'b8', to: 'a6' },     // 20... Na6
+      { from: 'f5', to: 'g7' },     // 21. Nxg7+
+      { from: 'e8', to: 'd8' },     // 21... Kd8
+      { from: 'f3', to: 'f6' },     // 22. Qf6+!! (queen sacrifice!)
+      { from: 'g8', to: 'f6' },     // 22... Nxf6
+      { from: 'd6', to: 'e7' },     // 23. Be7# CHECKMATE!
     ];
 
     let moveIndex = 0;
     const playNextMove = () => {
       if (!this._examplePlaying || moveIndex >= moves.length) {
-        // After main moves, start CPU to finish the game
-        if (this._examplePlaying) {
-          // Enable dumb mode for fast finish
-          this.cpuUseStockfish = false;
-          this._updateCpuUI();
-          this.cpuStart();
-        }
+        // The Immortal Game ends in checkmate - demo complete!
+        // Just stop playing (no CPU needed, game is over)
+        this._stopExamplePlay();
         return;
       }
 
