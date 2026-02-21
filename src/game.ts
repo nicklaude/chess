@@ -59,6 +59,7 @@ class GameManager {
   // Cached state for optimized re-renders (avoid unnecessary DOM updates)
   private _lastMoveListHtml = '';
   private _lastTimelineListHtml = '';
+  private _lastTimelineStructure = '';
 
   // Debounce timer for timeline hover highlighting
   private _highlightDebounceTimer: number | null = null;
@@ -618,7 +619,7 @@ class GameManager {
       if (!isResizing) return;
       const diff = e.clientY - startY;
       // Constrain to sensible limits
-      const maxHeight = 300;
+      const maxHeight = 500;
       const minHeight = 60;
       const newHeight = Math.max(minHeight, Math.min(maxHeight, startHeight + diff));
       panel.style.maxHeight = newHeight + 'px';
@@ -2638,108 +2639,97 @@ timelines - list timelines`,
   updateTimelineList(): void {
     const listEl = document.getElementById('timeline-list');
     if (!listEl) return;
-    let html = '';
     const colors = Board3D.TIMELINE_COLORS;
 
-    // Build parent-child relationships
-    const childrenOf: Record<number, number[]> = {};
-    for (const key in this.timelines) {
-      const tl = this.timelines[key];
-      if (tl.parentId !== null) {
-        if (!childrenOf[tl.parentId]) childrenOf[tl.parentId] = [];
-        childrenOf[tl.parentId].push(tl.id);
+    // Fixed 6-slot grid: Main + 5 branches (minimum visible)
+    const MIN_SLOTS = 6;
+    const slotNames = ['Main', 'Branch 1', 'Branch 2', 'Branch 3', 'Branch 4', 'Branch 5'];
+
+    // Map existing timelines to slots (by ID, sorted)
+    const timelineIds = Object.keys(this.timelines).map(k => parseInt(k)).sort((a, b) => a - b);
+    const totalSlots = Math.max(MIN_SLOTS, timelineIds.length);
+
+    // Check if structure changed (new timelines added)
+    const structureKey = timelineIds.join(',') + '|' + totalSlots;
+    const structureChanged = structureKey !== this._lastTimelineStructure;
+
+    if (structureChanged) {
+      // Full rebuild needed
+      let html = '';
+      for (let slot = 0; slot < totalSlots; slot++) {
+        const tlId = timelineIds[slot];
+        const tl = tlId !== undefined ? this.timelines[tlId] : null;
+        const color = colors[slot % colors.length];
+        const hexColor = '#' + color.toString(16).padStart(6, '0');
+
+        if (tl) {
+          const isActive = tl.id === this.activeTimelineId;
+          const turnCount = tl.moveHistory.length;
+
+          html +=
+            '<div class="tl-item' +
+            (isActive ? ' active' : '') +
+            '" data-tl-id="' +
+            tl.id +
+            '">' +
+            '<span class="tl-dot" style="background:' +
+            hexColor +
+            '"></span>' +
+            '<span class="tl-label">' +
+            tl.name +
+            '</span>' +
+            '<span class="tl-turn">' +
+            turnCount +
+            '</span></div>';
+        } else {
+          const name = slot < slotNames.length ? slotNames[slot] : 'Branch ' + slot;
+          html +=
+            '<div class="tl-item empty">' +
+            '<span class="tl-dot" style="background:' +
+            hexColor +
+            '; opacity: 0.3"></span>' +
+            '<span class="tl-label">' +
+            name +
+            '</span>' +
+            '<span class="tl-turn">-</span></div>';
+        }
       }
-    }
 
-    for (const key in this.timelines) {
-      const tl = this.timelines[key];
-      const id = tl.id;
-      const isActive = id === this.activeTimelineId;
-      const color = colors[id % colors.length];
-      const hexColor = '#' + color.toString(16).padStart(6, '0');
-      // Use moveHistory instead of chess.history() because chess.load() wipes history
-      const turnCount = tl.moveHistory.length;
-
-      // Check if this timeline has children (is a branch point)
-      const hasChildren = childrenOf[id] && childrenOf[id].length > 0;
-      const branchCount = hasChildren ? childrenOf[id].length : 0;
-
-      // Build branch indicator
-      let branchIndicator = '';
-      if (hasChildren) {
-        branchIndicator =
-          '<span class="tl-branch-count" title="' +
-          branchCount +
-          ' branch(es)">' +
-          '\u2442' +
-          branchCount +
-          '</span>';
-      }
-
-      // Show parent info for child timelines
-      let parentInfo = '';
-      if (tl.parentId !== null) {
-        const parentTl = this.timelines[tl.parentId];
-        const parentName = parentTl ? parentTl.name : 'Unknown';
-        parentInfo =
-          '<span class="tl-parent" title="Branched from ' +
-          parentName +
-          ' at move ' +
-          tl.branchTurn +
-          '">\u21B3 ' +
-          parentName +
-          '@' +
-          tl.branchTurn +
-          '</span>';
-      }
-
-      html +=
-        '<div class="tl-item' +
-        (isActive ? ' active' : '') +
-        (hasChildren ? ' has-branches' : '') +
-        '" data-tl-id="' +
-        id +
-        '" data-children="' +
-        (childrenOf[id] || []).join(',') +
-        '">' +
-        '<span class="tl-dot" style="background:' +
-        hexColor +
-        '"></span>' +
-        '<div class="tl-info">' +
-        '<span class="tl-label">' +
-        tl.name +
-        branchIndicator +
-        '</span>' +
-        parentInfo +
-        '</div>' +
-        '<span class="tl-turn">' +
-        turnCount +
-        '</span></div>';
-    }
-
-    // Only update DOM if content changed (avoids unnecessary re-renders)
-    if (html !== this._lastTimelineListHtml) {
       listEl.innerHTML = html;
-      this._lastTimelineListHtml = html;
+      this._lastTimelineStructure = structureKey;
 
-      // Attach click and hover handlers
-      const items = listEl.querySelectorAll('.tl-item');
+      // Attach click handlers
+      const items = listEl.querySelectorAll('.tl-item:not(.empty)');
       items.forEach((item) => {
         const tlId = parseInt((item as HTMLElement).dataset.tlId || '0');
-
-        // Click to select timeline
         item.addEventListener('click', () => {
           this.setActiveTimeline(tlId);
         });
+      });
+    } else {
+      // Just update active state and move counts in place (no scroll jump)
+      const items = listEl.querySelectorAll('.tl-item');
+      items.forEach((item) => {
+        const el = item as HTMLElement;
+        const tlId = el.dataset.tlId;
+        if (tlId === undefined) return; // empty slot
 
-        // Hover to highlight connected timelines
-        item.addEventListener('mouseenter', () => {
-          this._highlightConnectedTimelines(tlId, true);
-        });
+        const id = parseInt(tlId);
+        const tl = this.timelines[id];
+        if (!tl) return;
 
-        item.addEventListener('mouseleave', () => {
-          this._highlightConnectedTimelines(tlId, false);
-        });
+        // Update active class
+        if (id === this.activeTimelineId) {
+          el.classList.add('active');
+        } else {
+          el.classList.remove('active');
+        }
+
+        // Update move count
+        const turnEl = el.querySelector('.tl-turn');
+        if (turnEl) {
+          turnEl.textContent = String(tl.moveHistory.length);
+        }
       });
     }
   }
