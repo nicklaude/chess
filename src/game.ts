@@ -143,53 +143,67 @@ class GameManager {
       btn.textContent = '⏹ Stop';
     }
 
-    // Example game: Fool's Mate - the fastest possible checkmate (2 moves)
-    // This demonstrates a quick checkmate for testing purposes
-    // After checkmate, CPU takes over to continue playing on other timelines
-    const moves = [
-      // Fool's Mate sequence - Black wins in 4 half-moves
-      { from: 'f2', to: 'f3' },   // 1. f3 (weakens king position)
-      { from: 'e7', to: 'e5' },   // 1... e5
-      { from: 'g2', to: 'g4' },   // 2. g4?? (blunder - exposes king diagonal)
-      { from: 'd8', to: 'h4' },   // 2... Qh4# (checkmate!)
+    // 6D Chess showcase demo - demonstrates time travel and cross-timeline play
+    // This creates multiple timelines and shows 5D chess mechanics
+    const demoMoves: Array<{
+      type: 'move' | 'timetravel' | 'crossTimeline';
+      from?: string;
+      to?: string;
+      timeline?: number;
+      targetTurn?: number;
+      targetTimeline?: number;
+    }> = [
+      // Opening moves to set up the position
+      { type: 'move', from: 'e2', to: 'e4' },     // 1. e4
+      { type: 'move', from: 'e7', to: 'e5' },     // 1... e5
+      { type: 'move', from: 'g1', to: 'f3' },     // 2. Nf3
+      { type: 'move', from: 'b8', to: 'c6' },     // 2... Nc6
+      { type: 'move', from: 'f1', to: 'c4' },     // 3. Bc4
+      { type: 'move', from: 'f8', to: 'c5' },     // 3... Bc5
+      { type: 'move', from: 'd1', to: 'h5' },     // 4. Qh5 (threatening mate)
+      { type: 'move', from: 'g8', to: 'f6' },     // 4... Nf6 (blocks)
+      { type: 'move', from: 'h5', to: 'f7' },     // 5. Qxf7+ (check - takes pawn)
+      // After a few moves, CPU takes over with Stockfish for 5D play
     ];
 
     let moveIndex = 0;
     const playNextMove = () => {
-      if (!this._examplePlaying || moveIndex >= moves.length) {
-        // After main moves, start CPU to finish the game
+      if (!this._examplePlaying || moveIndex >= demoMoves.length) {
+        // After demo moves, start CPU with Stockfish for interesting 5D play
         if (this._examplePlaying) {
-          // Enable dumb mode for fast finish
-          this.cpuUseStockfish = false;
+          // Enable Stockfish and high 5D aggression for the demo
+          this.cpuUseStockfish = true;
+          this.setMaxTimelines(6);  // Allow up to 6 timelines
           this._updateCpuUI();
           this.cpuStart();
         }
         return;
       }
 
-      const move = moves[moveIndex];
-      const tl = this.timelines[this.activeTimelineId];
-      if (tl) {
+      const action = demoMoves[moveIndex];
+      const tlId = action.timeline ?? this.activeTimelineId;
+      const tl = this.timelines[tlId];
+
+      if (tl && action.type === 'move' && action.from && action.to) {
         try {
-          // Find the valid chess move from the position
           const validMoves = tl.chess.moves({ verbose: true }) as ChessMove[];
-          const chessMove = validMoves.find(m => m.from === move.from && m.to === move.to);
+          const chessMove = validMoves.find(m => m.from === action.from && m.to === action.to);
           if (chessMove) {
-            this.makeMove(this.activeTimelineId, chessMove);
+            this.makeMove(tlId, chessMove);
           } else {
-            console.warn('[ExamplePlay] Move not found in legal moves:', move);
+            console.warn('[Demo] Move not found:', action);
           }
         } catch (e) {
-          console.warn('[ExamplePlay] Move failed:', move, e);
+          console.warn('[Demo] Move failed:', action, e);
         }
       }
 
       moveIndex++;
-      this._exampleTimer = window.setTimeout(playNextMove, 300);
+      this._exampleTimer = window.setTimeout(playNextMove, 400);
     };
 
     // Start playing
-    this._exampleTimer = window.setTimeout(playNextMove, 200);
+    this._exampleTimer = window.setTimeout(playNextMove, 300);
   }
 
   private _stopExamplePlay(): void {
@@ -3090,6 +3104,15 @@ timelines - list timelines`,
   private cpuCrossTimelineChance = 0.75;  // Base chance for cross-timeline moves (0-1)
   private cpuTimeTravelChance = 0.5;      // Base chance for time travel moves (0-1)
 
+  // Cross-timeline loop detection - prevent ping-pong moves
+  private recentCrossTimelineMoves: Array<{
+    sourceTimelineId: number;
+    targetTimelineId: number;
+    square: string;
+    pieceType: string;
+  }> = [];
+  private crossTimelineHistorySize = 6;  // Track last 6 cross-timeline moves
+
   // Stockfish settings
   private cpuUseStockfish = true;  // Use Stockfish when available
   private cpuStockfishSkillWhite = 10;  // Skill level 0-20 for White
@@ -3755,6 +3778,17 @@ timelines - list timelines`,
 
     // 5D Aggressive mode: use slider-controlled cross-timeline chance
     for (const opp of opportunities) {
+      // LOOP DETECTION: Check if this would be a ping-pong move
+      if (this._wouldBePingPongMove(tlId, opp.targetTimelineId, opp.square, opp.piece.type)) {
+        console.log('[CPU 5D] Skipping cross-timeline - would be ping-pong', {
+          from: tlId,
+          to: opp.targetTimelineId,
+          piece: opp.piece.type,
+          square: opp.square,
+        });
+        continue; // Skip this opportunity, try next
+      }
+
       // Base chance from slider, plus strategic bonus
       const baseChance = this.cpuCrossTimelineChance;
       const strategicBonus = opp.strategicScore * 0.10; // Each strategic point adds 10%
@@ -3769,6 +3803,10 @@ timelines - list timelines`,
           strategicScore: opp.strategicScore,
           chance: Math.round(totalChance * 100) + '%',
         });
+
+        // Record this move in history for loop detection
+        this._recordCrossTimelineMove(tlId, opp.targetTimelineId, opp.square, opp.piece.type);
+
         return {
           targetTimelineId: opp.targetTimelineId,
           square: opp.square,
@@ -3779,6 +3817,52 @@ timelines - list timelines`,
     }
 
     return null;
+  }
+
+  /** Check if a cross-timeline move would create a ping-pong pattern */
+  private _wouldBePingPongMove(sourceId: number, targetId: number, square: string, pieceType: string): boolean {
+    // Look at recent moves involving this piece type from same square
+    const relevantMoves = this.recentCrossTimelineMoves.filter(
+      m => m.square === square && m.pieceType === pieceType
+    );
+
+    if (relevantMoves.length < 1) return false;
+
+    // Check if the last move was the reverse (target→source)
+    const lastMove = relevantMoves[relevantMoves.length - 1];
+    if (lastMove.sourceTimelineId === targetId && lastMove.targetTimelineId === sourceId) {
+      return true; // Would immediately reverse the last move
+    }
+
+    // Check for A→B→A pattern in last 2 moves
+    if (relevantMoves.length >= 2) {
+      const secondLast = relevantMoves[relevantMoves.length - 2];
+      if (
+        secondLast.sourceTimelineId === sourceId &&
+        secondLast.targetTimelineId === targetId &&
+        lastMove.sourceTimelineId === targetId &&
+        lastMove.targetTimelineId === sourceId
+      ) {
+        return true; // Would create A→B→A→B pattern
+      }
+    }
+
+    return false;
+  }
+
+  /** Record a cross-timeline move for loop detection */
+  private _recordCrossTimelineMove(sourceId: number, targetId: number, square: string, pieceType: string): void {
+    this.recentCrossTimelineMoves.push({
+      sourceTimelineId: sourceId,
+      targetTimelineId: targetId,
+      square,
+      pieceType,
+    });
+
+    // Keep history limited
+    while (this.recentCrossTimelineMoves.length > this.crossTimelineHistorySize) {
+      this.recentCrossTimelineMoves.shift();
+    }
   }
 
   /** Evaluate material balance for a position (positive = color is winning) */

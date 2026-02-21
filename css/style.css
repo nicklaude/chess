@@ -824,12 +824,18 @@ body::-webkit-scrollbar {
     gap: 0.3rem;
 }
 
-/* Camera toggle button */
-#cpu-camera-toggle {
+/* Sidebar icon buttons - shared class for consistent styling */
+.sidebar-icon-btn {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
     width: 32px;
     min-width: 32px;
-    height: auto;
-    padding: 0.4rem;
+    max-width: 32px;
+    height: 32px;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0;
     margin-top: 0.3rem;
     font-size: 1rem;
     line-height: 1;
@@ -838,57 +844,25 @@ body::-webkit-scrollbar {
     border-radius: 6px;
     color: #8888bb;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+    box-sizing: border-box;
 }
 
-#cpu-camera-toggle svg {
+.sidebar-icon-btn svg {
     width: 16px;
     height: 16px;
+    flex-shrink: 0;
 }
 
-#cpu-camera-toggle:hover {
+.sidebar-icon-btn:hover {
     background: rgba(80, 80, 120, 0.5);
 }
 
-#cpu-camera-toggle.active {
-    background: rgba(80, 160, 200, 0.3);
-    border-color: rgba(80, 160, 200, 0.5);
-    color: #88ddff;
-}
-
-/* 2D mode toggle button - exact copy of camera toggle */
-#2d-mode-toggle {
-    width: 32px;
-    min-width: 32px;
-    height: auto;
-    padding: 0.4rem;
-    margin-top: 0.3rem;
-    font-size: 1rem;
-    line-height: 1;
-    background: rgba(60, 60, 100, 0.4);
-    border: 1px solid rgba(80, 80, 160, 0.3);
-    border-radius: 6px;
-    color: #8888bb;
-    cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#2d-mode-toggle svg {
-    width: 16px;
-    height: 16px;
-}
-
-#2d-mode-toggle:hover {
-    background: rgba(80, 80, 120, 0.5);
-}
-
-#2d-mode-toggle.active {
+.sidebar-icon-btn.active {
     background: rgba(80, 160, 200, 0.3);
     border-color: rgba(80, 160, 200, 0.5);
     color: #88ddff;
