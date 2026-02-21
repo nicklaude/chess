@@ -860,6 +860,9 @@ body::-webkit-scrollbar {
 
 /* 2D mode toggle - styled exactly like camera button */
 #2d-mode-toggle {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
     width: 32px;
     min-width: 32px;
     height: auto;
