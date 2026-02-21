@@ -3069,7 +3069,7 @@ timelines - list timelines`,
   private cpuEnabled = false;
   private cpuTimer: number | null = null;
   private cpuMoveDelay = 400;  // ms between moves (faster for visual effect)
-  private maxTimelines = 5;   // Default to 5 branches, adjustable via slider (max 100)
+  private maxTimelines = 6;   // Default to 6 total timelines (main + 5 branches), adjustable via slider (0-30)
   private cpuCameraFollow = true;  // Auto-follow moves with camera
   private cpuGlobalTurn: PieceColor = 'w';  // Track whose turn globally (independent of per-timeline state)
 
@@ -3137,9 +3137,11 @@ timelines - list timelines`,
     this.cpuMoveDelay = Math.max(100, Math.min(2000, ms));
   }
 
-  /** Set max timelines/branches (5-100) */
+  /** Set max timelines/branches (0-30, where 0=main only, 6=default with 5 branches) */
   setMaxTimelines(count: number): void {
-    this.maxTimelines = Math.max(5, Math.min(100, count));
+    // 0 means only main timeline, 1 means main + 1 branch, etc.
+    // Clamp to 0-30 range
+    this.maxTimelines = Math.max(0, Math.min(30, count));
   }
 
   /** Toggle camera follow mode */
@@ -3171,7 +3173,7 @@ timelines - list timelines`,
   }
 
   /** Main CPU tick - called repeatedly while enabled */
-  private _cpuTick(): void {
+  private async _cpuTick(): Promise<void> {
     if (!this.cpuEnabled) return;
 
     // RACE CONDITION PREVENTION: If a move is already in progress OR pending, skip this tick
@@ -3222,7 +3224,7 @@ timelines - list timelines`,
     try {
       // 5D-aware timeline selection: prioritize based on tactical evaluation
       const tlId = this._cpuSelectBestTimeline(playableTimelines);
-      const moved = this._cpuMakeMove(tlId);
+      const moved = await this._cpuMakeMove(tlId);
 
       if (moved) {
         // After successful move, flip global turn
@@ -3370,7 +3372,7 @@ timelines - list timelines`,
   } | null = null;
 
   /** Make a CPU move on the given timeline (with preview pause) */
-  private _cpuMakeMove(tlId: number): boolean {
+  private async _cpuMakeMove(tlId: number): Promise<boolean> {
     const tl = this.timelines[tlId];
     if (!tl) return false;
 
@@ -3455,18 +3457,17 @@ timelines - list timelines`,
     }
 
     // Use Stockfish for move selection if available, otherwise fall back to random
-    this._selectCpuMove(tlId, tl.chess.fen(), moves, capturePreference, isWhite).then((move) => {
-      if (!move) {
-        console.warn('[CPU] No move selected, skipping');
-        return;
-      }
+    const move = await this._selectCpuMove(tlId, tl.chess.fen(), moves, capturePreference, isWhite);
+    if (!move) {
+      console.warn('[CPU] No move selected, skipping');
+      return false;
+    }
 
-      // Store pending move and execute immediately (indicator shown after)
-      this.cpuPendingMove = { tlId, move, isWhite, isTimeTravel: false, isCrossTimeline: false };
+    // Store pending move and execute immediately (indicator shown after)
+    this.cpuPendingMove = { tlId, move, isWhite, isTimeTravel: false, isCrossTimeline: false };
 
-      // Execute immediately - indicator shown AFTER move
-      this._cpuExecutePendingMove();
-    });
+    // Execute immediately - indicator shown AFTER move
+    this._cpuExecutePendingMove();
 
     return true;
   }
