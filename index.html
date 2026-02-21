@@ -48,7 +48,7 @@
                     <div class="cpu-section-header">
                         <span><i data-lucide="brain"></i> Stockfish AI</span>
                         <div class="cpu-stockfish-toggle">
-                            <button id="cpu-dumb-toggle" title="Toggle dumb mode (random moves)">🎲</button>
+                            <button id="cpu-dumb-toggle" class="stockfish-toggle active" title="Toggle Stockfish on/off">ON</button>
                             <span id="cpu-stockfish-status" class="cpu-stockfish-status">Loading...</span>
                         </div>
                     </div>
@@ -62,10 +62,10 @@
                 <!-- 5D Chess Settings -->
                 <div id="cpu-5d-controls" class="cpu-section">
                     <div class="cpu-section-header">
-                        <span><i data-lucide="orbit"></i> 5D Chess Aggression</span>
+                        <span><i data-lucide="orbit"></i> 5D Aggression</span>
                     </div>
-                    <label>Cross-Timeline %: <input type="range" id="cpu-cross-timeline" min="0" max="100" value="60" step="5"><span id="cpu-cross-timeline-value">60%</span></label>
-                    <label>Time Travel %: <input type="range" id="cpu-time-travel" min="0" max="100" value="40" step="5"><span id="cpu-time-travel-value">40%</span></label>
+                    <label>Cross-Timeline %: <input type="range" id="cpu-cross-timeline" min="0" max="100" value="75" step="5"><span id="cpu-cross-timeline-value">75%</span></label>
+                    <label>Time Travel %: <input type="range" id="cpu-time-travel" min="0" max="100" value="50" step="5"><span id="cpu-time-travel-value">50%</span></label>
                     <div class="portal-sliders">
                         <span class="portal-label">Per-Piece Portal %:</span>
                         <label title="Queen">♕<input type="range" id="cpu-portal-q" min="0" max="100" value="50" step="5"><span>50</span></label>

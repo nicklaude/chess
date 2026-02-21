@@ -3086,9 +3086,9 @@ timelines - list timelines`,
   private cpuWhitePortalBias: Record<string, number> = { q: 0.5, r: 0.4, b: 0.35, n: 0.3 };
   private cpuBlackPortalBias: Record<string, number> = { q: 0.5, r: 0.4, b: 0.35, n: 0.3 };
 
-  // 5D Chess aggression settings
-  private cpuCrossTimelineChance = 0.6;  // Base chance for cross-timeline moves (0-1)
-  private cpuTimeTravelChance = 0.4;     // Base chance for time travel moves (0-1)
+  // 5D Chess aggression settings (increased for more dynamic multi-board play)
+  private cpuCrossTimelineChance = 0.75;  // Base chance for cross-timeline moves (0-1)
+  private cpuTimeTravelChance = 0.5;      // Base chance for time travel moves (0-1)
 
   // Stockfish settings
   private cpuUseStockfish = true;  // Use Stockfish when available
@@ -3329,6 +3329,21 @@ timelines - list timelines`,
       } else if (advantageMultiplier < 0) {
         // We're behind - prioritize defending here
         score += Math.abs(advantageMultiplier) * 2;
+      }
+
+      // Priority 5: Balance play across boards (prefer less-played timelines)
+      // This prevents one board from getting 168 moves while another has 8
+      const moveCount = tl.moveHistory.length;
+      const avgMoves = playable.reduce((sum, id) => {
+        const t = this.timelines[id];
+        return sum + (t ? t.moveHistory.length : 0);
+      }, 0) / playable.length;
+      if (moveCount < avgMoves * 0.5) {
+        // This board has less than half the average moves - prioritize it
+        score += 20;
+      } else if (moveCount < avgMoves * 0.8) {
+        // Moderately under-played
+        score += 10;
       }
 
       // Small random factor to avoid being too predictable
@@ -3829,8 +3844,9 @@ timelines - list timelines`,
       }
     }
     if (dumbToggle) {
-      dumbToggle.classList.toggle('active', !this.cpuUseStockfish);
-      dumbToggle.title = this.cpuUseStockfish ? 'Using Stockfish (click for random moves)' : 'Using random moves (click for Stockfish)';
+      dumbToggle.textContent = this.cpuUseStockfish ? 'ON' : 'OFF';
+      dumbToggle.classList.toggle('active', this.cpuUseStockfish);
+      dumbToggle.title = this.cpuUseStockfish ? 'Stockfish enabled (click to disable)' : 'Stockfish disabled (click to enable)';
     }
 
     // Update 2D mode button

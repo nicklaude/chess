@@ -729,22 +729,33 @@ body::-webkit-scrollbar {
 
 #cpu-controls input[type="range"] {
     width: 60%;
-    height: 4px;
+    height: 6px;
     -webkit-appearance: none;
     appearance: none;
     background: rgba(80, 80, 160, 0.3);
-    border-radius: 2px;
+    border-radius: 3px;
     outline: none;
     cursor: pointer;
+    touch-action: manipulation;
 }
 
 #cpu-controls input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 12px;
-    height: 12px;
+    width: 20px;
+    height: 20px;
     background: #6688cc;
     border-radius: 50%;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+#cpu-controls input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #6688cc;
+    border-radius: 50%;
+    border: none;
     cursor: pointer;
 }
 
@@ -954,22 +965,26 @@ body::-webkit-scrollbar {
 }
 
 #cpu-dumb-toggle {
-    background: rgba(60, 60, 100, 0.4);
+    background: rgba(60, 60, 100, 0.5);
     border: 1px solid rgba(80, 80, 160, 0.3);
     border-radius: 4px;
-    padding: 0.15rem 0.3rem;
-    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #888;
     cursor: pointer;
     transition: all 0.2s;
+    min-width: 32px;
 }
 
 #cpu-dumb-toggle:hover {
-    background: rgba(80, 80, 120, 0.5);
+    background: rgba(80, 80, 120, 0.6);
 }
 
 #cpu-dumb-toggle.active {
-    background: rgba(180, 120, 60, 0.4);
-    border-color: rgba(200, 140, 80, 0.5);
+    background: rgba(80, 160, 100, 0.4);
+    border-color: rgba(80, 160, 100, 0.6);
+    color: #8f8;
 }
 
 /* Per-color skill sliders row */
