@@ -839,14 +839,12 @@ body::-webkit-scrollbar {
     color: #88ddff;
 }
 
+/* 2D mode toggle - styled like camera button */
 #2d-mode-toggle {
     width: 32px;
     min-width: 32px;
-    height: auto;
-    padding: 0.4rem;
-    margin-top: 0.3rem;
-    font-size: 1rem;
-    line-height: 1;
+    height: 32px;
+    padding: 0;
     background: rgba(60, 60, 100, 0.4);
     border: 1px solid rgba(80, 80, 160, 0.3);
     border-radius: 6px;
@@ -868,23 +866,9 @@ body::-webkit-scrollbar {
 }
 
 #2d-mode-toggle.active {
-    background: rgba(160, 120, 200, 0.3);
-    border-color: rgba(160, 120, 200, 0.5);
-    color: #dd88ff;
-}
-
-/* 2D/3D mode icon toggle - show square when in 3D (to switch to 2D), show box when in 2D (to switch to 3D) */
-#2d-mode-toggle .icon-2d {
-    display: block;
-}
-#2d-mode-toggle .icon-3d {
-    display: none;
-}
-#2d-mode-toggle.active .icon-2d {
-    display: none;
-}
-#2d-mode-toggle.active .icon-3d {
-    display: block;
+    background: rgba(80, 160, 200, 0.3);
+    border-color: rgba(80, 160, 200, 0.5);
+    color: #88ddff;
 }
 
 /* CPU Section styling */

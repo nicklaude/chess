@@ -2709,7 +2709,9 @@ timelines - list timelines`,
       const items = listEl.querySelectorAll('.tl-item:not(.empty)');
       items.forEach((item) => {
         const tlId = parseInt((item as HTMLElement).dataset.tlId || '0');
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent any bubbling issues
+          console.log('[TIMELINE_CLICK] Clicked timeline', tlId, 'current active:', this.activeTimelineId);
           this.setActiveTimeline(tlId);
         });
       });
