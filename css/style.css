@@ -58,6 +58,12 @@ body::-webkit-scrollbar {
     box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
 }
 
+/* Ensure all sidebar children respect boundaries */
+#sidebar > * {
+    max-width: 100%;
+    min-width: 0;
+}
+
 #sidebar-resize {
     position: absolute;
     left: 0;
@@ -82,6 +88,9 @@ body::-webkit-scrollbar {
     background: linear-gradient(135deg, rgba(35, 35, 65, 0.7) 0%, rgba(45, 45, 80, 0.6) 100%);
     border-radius: 10px;
     text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     border: 1px solid rgba(80, 80, 160, 0.25);
     white-space: nowrap;
     overflow: hidden;
@@ -899,10 +908,13 @@ body::-webkit-scrollbar {
     gap: 0.4rem;
     font-size: 0.7rem;
     margin-top: 0.25rem;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .cpu-section input[type="range"] {
     flex: 1;
+    min-width: 0;
     height: 4px;
 }
 
@@ -984,6 +996,8 @@ body::-webkit-scrollbar {
     display: flex;
     align-items: center;
     gap: 0.3rem;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .cpu-skill-row .cpu-color-dot {
@@ -1180,14 +1194,17 @@ body::-webkit-scrollbar {
         padding: 0.5rem;
         min-height: 44px;
         flex-shrink: 0;
-        overflow: visible;
+        overflow: hidden;
+        max-width: 100%;
     }
 
     #fen-text {
         /* Keep horizontal scroll on mobile too */
         white-space: nowrap;
         overflow-x: auto;
+        overflow-y: hidden;
         line-height: 1.4;
+        max-width: 100%;
     }
 
     /* FEN tooltip positioning fix for mobile */
