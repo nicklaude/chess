@@ -824,46 +824,74 @@ body::-webkit-scrollbar {
     gap: 0.3rem;
 }
 
-/* Sidebar icon buttons - camera and 2D toggle share identical styles */
-#cpu-camera-toggle,
-#2d-mode-toggle {
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
-    appearance: none !important;
-    width: 32px !important;
-    min-width: 32px !important;
-    height: auto !important;
-    padding: 0.4rem !important;
-    margin-top: 0.3rem !important;
-    font-size: 1rem !important;
-    line-height: 1 !important;
-    background: rgba(60, 60, 100, 0.4) !important;
-    border: 1px solid rgba(80, 80, 160, 0.3) !important;
-    border-radius: 6px !important;
-    color: #8888bb !important;
-    cursor: pointer !important;
-    transition: all 0.2s !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
+/* Camera toggle button */
+#cpu-camera-toggle {
+    width: 32px;
+    min-width: 32px;
+    height: auto;
+    padding: 0.4rem;
+    margin-top: 0.3rem;
+    font-size: 1rem;
+    line-height: 1;
+    background: rgba(60, 60, 100, 0.4);
+    border: 1px solid rgba(80, 80, 160, 0.3);
+    border-radius: 6px;
+    color: #8888bb;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-#cpu-camera-toggle svg,
+#cpu-camera-toggle svg {
+    width: 16px;
+    height: 16px;
+}
+
+#cpu-camera-toggle:hover {
+    background: rgba(80, 80, 120, 0.5);
+}
+
+#cpu-camera-toggle.active {
+    background: rgba(80, 160, 200, 0.3);
+    border-color: rgba(80, 160, 200, 0.5);
+    color: #88ddff;
+}
+
+/* 2D mode toggle button - exact copy of camera toggle */
+#2d-mode-toggle {
+    width: 32px;
+    min-width: 32px;
+    height: auto;
+    padding: 0.4rem;
+    margin-top: 0.3rem;
+    font-size: 1rem;
+    line-height: 1;
+    background: rgba(60, 60, 100, 0.4);
+    border: 1px solid rgba(80, 80, 160, 0.3);
+    border-radius: 6px;
+    color: #8888bb;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 #2d-mode-toggle svg {
     width: 16px;
     height: 16px;
 }
 
-#cpu-camera-toggle:hover,
 #2d-mode-toggle:hover {
-    background: rgba(80, 80, 120, 0.5) !important;
+    background: rgba(80, 80, 120, 0.5);
 }
 
-#cpu-camera-toggle.active,
 #2d-mode-toggle.active {
-    background: rgba(80, 160, 200, 0.3) !important;
-    border-color: rgba(80, 160, 200, 0.5) !important;
-    color: #88ddff !important;
+    background: rgba(80, 160, 200, 0.3);
+    border-color: rgba(80, 160, 200, 0.5);
+    color: #88ddff;
 }
 
 /* CPU Section styling */

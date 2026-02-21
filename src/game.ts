@@ -3229,7 +3229,15 @@ timelines - list timelines`,
       if (moved) {
         // After successful move, flip global turn
         this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
+      } else {
+        // Move failed - flip turn anyway to avoid getting stuck in infinite loop
+        console.warn('[CPU] Move failed, flipping turn to avoid stuck state');
+        this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
       }
+    } catch (error) {
+      // Fatal error - flip turn and continue to prevent hanging
+      console.error('[CPU] Fatal error during move execution:', error);
+      this.cpuGlobalTurn = isWhiteTurn ? 'b' : 'w';
     } finally {
       // RACE CONDITION PREVENTION: Release lock after move completes
       this.cpuMoveInProgress = false;
@@ -3428,9 +3436,8 @@ timelines - list timelines`,
           },
         };
 
-        // Execute immediately - indicator shown AFTER move
-        this._cpuExecutePendingMove();
-        return true;
+        // Execute and return actual success status
+        return this._cpuExecutePendingMove();
       }
     }
 
@@ -3451,9 +3458,8 @@ timelines - list timelines`,
         },
       };
 
-      // Execute immediately - indicator shown AFTER move
-      this._cpuExecutePendingMove();
-      return true;
+      // Execute and return actual success status
+      return this._cpuExecutePendingMove();
     }
 
     // Use Stockfish for move selection if available, otherwise fall back to random
@@ -3466,10 +3472,8 @@ timelines - list timelines`,
     // Store pending move and execute immediately (indicator shown after)
     this.cpuPendingMove = { tlId, move, isWhite, isTimeTravel: false, isCrossTimeline: false };
 
-    // Execute immediately - indicator shown AFTER move
-    this._cpuExecutePendingMove();
-
-    return true;
+    // Execute and return actual success status
+    return this._cpuExecutePendingMove();
   }
 
   /** Select a CPU move using Stockfish or random fallback */
@@ -3518,9 +3522,9 @@ timelines - list timelines`,
     return move;
   }
 
-  /** Execute the pending CPU move and show indicator after */
-  private _cpuExecutePendingMove(): void {
-    if (!this.cpuPendingMove) return;
+  /** Execute the pending CPU move and show indicator after. Returns true if successful. */
+  private _cpuExecutePendingMove(): boolean {
+    if (!this.cpuPendingMove) return false;
 
     const { tlId, move, isWhite, isTimeTravel, isCrossTimeline, timeTravelData, crossTimelineData } = this.cpuPendingMove;
     this.cpuPendingMove = null;
@@ -3528,53 +3532,58 @@ timelines - list timelines`,
     // Clear any existing indicators first
     Board3D.clearAllCpuPreviews();
 
-    if (isTimeTravel && timeTravelData) {
-      // Execute time travel move
-      console.log('[CPU] Time traveling!', { timeline: tlId });
-      this._makeTimeTravelMove(
-        tlId,
-        timeTravelData.sourceSquare,
-        timeTravelData.targetTurnIndex,
-        timeTravelData.piece,
-        timeTravelData.capturedPiece
-      );
-      // Show indicator on source square after move completes
-      const col = Board3D.getTimeline(tlId);
-      if (col) {
-        col.showCpuMovePreview(timeTravelData.sourceSquare, timeTravelData.sourceSquare, isWhite, true);
-        // Fade out after 800ms
-        window.setTimeout(() => col.clearCpuMovePreview(), 800);
+    try {
+      if (isTimeTravel && timeTravelData) {
+        // Execute time travel move
+        console.log('[CPU] Time traveling!', { timeline: tlId });
+        this._makeTimeTravelMove(
+          tlId,
+          timeTravelData.sourceSquare,
+          timeTravelData.targetTurnIndex,
+          timeTravelData.piece,
+          timeTravelData.capturedPiece
+        );
+        // Show indicator on source square after move completes
+        const col = Board3D.getTimeline(tlId);
+        if (col) {
+          col.showCpuMovePreview(timeTravelData.sourceSquare, timeTravelData.sourceSquare, isWhite, true);
+          window.setTimeout(() => col.clearCpuMovePreview(), 800);
+        }
+        return true;
+      } else if (isCrossTimeline && crossTimelineData) {
+        // Execute cross-timeline move
+        console.log('[CPU] Crossing timelines!', {
+          from: tlId,
+          to: crossTimelineData.targetTimelineId,
+          piece: crossTimelineData.piece.type,
+        });
+        this.makeCrossTimelineMove(
+          tlId,
+          crossTimelineData.targetTimelineId,
+          crossTimelineData.square,
+          crossTimelineData.piece
+        );
+        // Show indicator on source square after move completes
+        const col = Board3D.getTimeline(tlId);
+        if (col) {
+          col.showCpuMovePreview(crossTimelineData.square, crossTimelineData.square, isWhite, false);
+          window.setTimeout(() => col.clearCpuMovePreview(), 800);
+        }
+        return true;
+      } else {
+        // Execute normal move (auto-queen for CPU promotions)
+        this.makeMove(tlId, move, move.promotion ? 'q' : undefined);
+        // Show indicator from->to after move completes
+        const col = Board3D.getTimeline(tlId);
+        if (col) {
+          col.showCpuMovePreview(move.from, move.to, isWhite, false);
+          window.setTimeout(() => col.clearCpuMovePreview(), 800);
+        }
+        return true;
       }
-    } else if (isCrossTimeline && crossTimelineData) {
-      // Execute cross-timeline move
-      console.log('[CPU] Crossing timelines!', {
-        from: tlId,
-        to: crossTimelineData.targetTimelineId,
-        piece: crossTimelineData.piece.type,
-      });
-      this.makeCrossTimelineMove(
-        tlId,
-        crossTimelineData.targetTimelineId,
-        crossTimelineData.square,
-        crossTimelineData.piece
-      );
-      // Show indicator on source square after move completes
-      const col = Board3D.getTimeline(tlId);
-      if (col) {
-        col.showCpuMovePreview(crossTimelineData.square, crossTimelineData.square, isWhite, false);
-        // Fade out after 800ms
-        window.setTimeout(() => col.clearCpuMovePreview(), 800);
-      }
-    } else {
-      // Execute normal move (auto-queen for CPU promotions)
-      this.makeMove(tlId, move, move.promotion ? 'q' : undefined);
-      // Show indicator from->to after move completes
-      const col = Board3D.getTimeline(tlId);
-      if (col) {
-        col.showCpuMovePreview(move.from, move.to, isWhite, false);
-        // Fade out after 800ms
-        window.setTimeout(() => col.clearCpuMovePreview(), 800);
-      }
+    } catch (error) {
+      console.error('[CPU] Move execution failed:', error);
+      return false;
     }
   }
 
