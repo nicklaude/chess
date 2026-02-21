@@ -2297,7 +2297,8 @@ class Board3DManager implements IBoard3D {
     type: 'portal' | 'capture';
   }> = [];
 
-  // Use WHITE CHESS symbols (outlined) for both colors to avoid emoji rendering
+  // Use WHITE CHESS symbols (outlined) for BOTH colors to avoid emoji rendering on iOS
+  // Filled symbols like ♟ (U+265F) render as emoji on Safari/iOS
   // The fill/stroke colors in _pieceTexture() distinguish white vs black pieces
   readonly PIECE_CHARS: PieceCharMap = {
     K: '\u2654',  // ♔ WHITE CHESS KING
